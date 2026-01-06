@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TXT 檔案解析工具模板</title>
+    <style>
+        /* 基礎樣式重置與版面設定 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        /* 卡片容器樣式 */
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+
+        p {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* 檔案上傳區塊樣式 */
+        .upload-box {
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 2rem 1rem;
+            margin-bottom: 1.5rem;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .upload-box:hover {
+            border-color: #4299e1;
+        }
+
+        /* 隱藏原始 input，用 label 來美化 */
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-label {
+            display: block;
+            color: #4a5568;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .file-name {
+            display: block;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #2b6cb0;
+        }
+
+        /* 操作按鈕樣式 */
+        .action-btn {
+            background-color: #4299e1;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+
+        .action-btn:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+        }
+
+        .action-btn:hover:not(:disabled) {
+            background-color: #3182ce;
+        }
+
+        /* 下載按鈕的特定樣式 */
+        .action-btn.download-mode {
+            background-color: #48bb78;
+        }
+        .action-btn.download-mode:hover {
+            background-color: #38a169;
+        }
+
+        /* 狀態文字 */
+        .status-text {
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: #718096;
+            height: 1.2em; /* 預留高度避免跳動 */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>檔案解析工具</h1>
+        <p>請上傳 .txt 檔案，系統將自動進行格式整理。</p>
+
+        <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept=".txt">
+            <label for="fileInput" class="file-label">
+                點擊此處選擇檔案
+                <span id="fileNameDisplay" class="file-name"></span>
+            </label>
+        </div>
+
+        <button id="actionBtn" class="action-btn" disabled>開始解析</button>
+        
+        <div id="statusText" class="status-text"></div>
+    </div>
+
+    <script>
+        // DOM 元素選取
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const actionBtn = document.getElementById('actionBtn');
+        const statusText = document.getElementById('statusText');
+
+        // 變數存儲
+        let currentFile = null;
+        let processedBlobUrl = null;
+        let isProcessed = false; // 狀態標記
+
+        // 1. 監聽檔案選擇
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                currentFile = e.target.files[0];
+                
+                // 驗證檔案類型 (雙重防護，除了 accept 屬性外再檢查一次)
+                if (currentFile.type !== "text/plain" && !currentFile.name.endsWith('.txt')) {
+                    alert("僅支援 .txt 檔案格式");
+                    resetUI();
+                    return;
+                }
+
+                // 更新 UI
+                fileNameDisplay.textContent = `已選擇: ${currentFile.name}`;
+                actionBtn.disabled = false;
+                resetButtonToParseMode(); // 若重新選檔，按鈕要重置回「解析」狀態
+            }
+        });
+
+        // 2. 監聽按鈕點擊
+        actionBtn.addEventListener('click', () => {
+            if (isProcessed) {
+                // 如果已經處理完，這個按鈕的功能就是「下載」
+                handleDownload();
+            } else {
+                // 否則，這個按鈕的功能是「解析」
+                handleProcess();
+            }
+        });
+
+        // 處理邏輯 (Mock)
+        function handleProcess() {
+            // UI 狀態：處理中
+            actionBtn.disabled = true;
+            actionBtn.textContent = "資料解析中...";
+            statusText.textContent = "正在讀取並轉換資料結構...";
+
+            // 模擬異步處理時間 (1.5秒)
+            setTimeout(() => {
+                // --- 這裡未來放置真正的解析邏輯 ---
+                // 目前僅做簡單模擬：讀取檔案，並不做修改，直接準備好下載
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const originalContent = e.target.result;
+                    
+                    // 模擬產出新內容
+                    const newContent = originalContent; 
+
+                    // 建立下載連結 Blob
+                    const blob = new Blob([newContent], { type: 'text/plain' });
+                    if (processedBlobUrl) URL.revokeObjectURL(processedBlobUrl); // 清除舊記憶體
+                    processedBlobUrl = URL.createObjectURL(blob);
+
+                    // UI 狀態：處理完成，切換為下載模式
+                    changeButtonToDownloadMode();
+                };
+                reader.readAsText(currentFile);
+                
+            }, 1500);
+        }
+
+        // 下載邏輯
+        function handleDownload() {
+            const tempLink = document.createElement('a');
+            tempLink.href = processedBlobUrl;
+            // 設定下載檔名，這裡範例為 "processed_" + 原檔名
+            tempLink.download = `processed_${currentFile.name}`;
+            document.body.appendChild(tempLink);
+            tempLink.click();
+            document.body.removeChild(tempLink);
+            
+            statusText.textContent = "下載已開始";
+        }
+
+        // 輔助函式：切換按鈕為下載模式
+        function changeButtonToDownloadMode() {
+            isProcessed = true;
+            actionBtn.disabled = false;
+            actionBtn.textContent = "下載處理後的檔案";
+            actionBtn.classList.add('download-mode');
+            statusText.textContent = "解析完成！";
+        }
+
+        // 輔助函式：重置按鈕為解析模式
+        function resetButtonToParseMode() {
+            isProcessed = false;
+            actionBtn.textContent = "開始解析";
+            actionBtn.classList.remove('download-mode');
+            statusText.textContent = "";
+            if (processedBlobUrl) {
+                URL.revokeObjectURL(processedBlobUrl);
+                processedBlobUrl = null;
+            }
+        }
+
+        // 輔助函式：重置整個 UI
+        function resetUI() {
+            fileInput.value = '';
+            currentFile = null;
+            fileNameDisplay.textContent = '';
+            actionBtn.disabled = true;
+            resetButtonToParseMode();
+        }
+    </script>
+</body>
+</html>
