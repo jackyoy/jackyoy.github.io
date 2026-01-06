@@ -28,10 +28,10 @@
 
 ### 🚀 快速開始
 
-1.  確認專案目錄中包含以下三個檔案：
-    * `index.html`
-    * `index.css`
-    * `index.js`
+1.  確認專案目錄中包含以下三個檔案（需位於同一路徑）：
+    * `index.html` (結構)
+    * `index.css` (樣式)
+    * `index.js` (邏輯)
 2.  直接使用瀏覽器（Chrome, Edge, Firefox, Safari）開啟 `index.html`。
 3.  **單檔模式**：上傳一個檔案，點擊「開始轉換」。
 4.  **比對模式**：分別上傳兩個檔案，點擊「開始精準比對」。
@@ -47,3 +47,80 @@
   [ SECTION ] PCI Devices & Network Info
 ==================================================
 Content here...
+```
+
+**2. STATIC 格式 (Command Based)**
+包含指令說明與原始指令。
+```text
+==================================================
+說明: 檢查 RHEL 發行版本
+指令: cat /etc/redhat-release
+--------------------------------------------------
+Red Hat Enterprise Linux release 8.9
+```
+
+### 🛠️ 技術棧
+* **HTML5 / CSS3** (Flexbox Layout)
+* **JavaScript (ES6+)**
+* **No External Dependencies**: 無需安裝 Node.js、React 或 Vue，隨開即用。
+
+---
+
+## <a name="english"></a>English
+
+### 📖 Introduction
+A lightweight, **Client-Side Only** web tool designed for System Engineers and DevOps/SREs. It transforms raw text-based system diagnostic logs into readable HTML reports and provides a powerful **Side-by-Side Diff** feature.
+
+This tool runs entirely in your browser. **No files are uploaded to any server**, ensuring that sensitive system information (IPs, user accounts, crontabs) remains 100% private and secure.
+
+### ✨ Key Features
+
+* **🛡️ Privacy First**: All processing is done locally in the browser. No backend server involved.
+* **👁️ Single File Visualization**: Automatically parses messy log files into a clean HTML report with a sidebar navigation.
+* **⚖️ Precision Side-by-Side Diff**:
+    * Upload a "Base" file and a "Target" file for comparison.
+    * Powered by **Myers' Diff Algorithm** (the same algorithm used by Git), ensuring perfect alignment even with large block insertions or deletions.
+    * **Split View** display highlights additions (Green), deletions (Red), and modifications (Yellow).
+    * Includes **Lookahead Alignment** to prevent visual misalignment caused by single-line shifts.
+* **📂 Multi-Format Support**:
+    * Supports `.txt`, `.html`, and `.htm` files.
+    * Smart text extraction for logs saved as web pages.
+* **🔄 User Friendly**: Drag-and-drop support, one-click HTML report download, and instant reset functionality.
+
+### 🚀 Quick Start
+
+1.  Ensure the following three files are in the same directory:
+    * `index.html`
+    * `index.css`
+    * `index.js`
+2.  Open `index.html` directly in any modern browser (Chrome, Edge, Firefox, Safari).
+3.  **Single Mode**: Upload one file and click "Start Conversion".
+4.  **Diff Mode**: Upload two files and click "Start Precision Diff".
+
+### 📝 Supported Log Formats
+
+The tool automatically detects and parses the following log structures:
+
+**1. DIAG Format (Section Based)**
+Common in automated system collection scripts.
+```text
+==================================================
+  [ SECTION ] PCI Devices & Network Info
+==================================================
+Content here...
+```
+
+**2. STATIC Format (Command Based)**
+Includes description and command meta-data.
+```text
+==================================================
+說明: Check RHEL Release
+指令: cat /etc/redhat-release
+--------------------------------------------------
+Red Hat Enterprise Linux release 8.9
+```
+
+### 🛠️ Tech Stack
+* **HTML5 / CSS3** (Flexbox Layout)
+* **JavaScript (ES6+)**
+* **No External Dependencies**: No Node.js, React, or Vue required. Just open and run.
