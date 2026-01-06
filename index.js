@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let files = [null, null, null]; 
     let downloadUrl = null;
 
-    // --- UI 互動邏輯 (保持不變) ---
+    // --- UI 互動邏輯 ---
     window.triggerFile = (idx) => fileInputs[idx].click();
     
     window.clearFile = (idx, event) => {
@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (files[1] && files[2]) {
-            actionBtn.textContent = "開始比對 (Compare)";
+            actionBtn.textContent = "開始左右比對 (Side-by-Side)";
             actionBtn.disabled = false;
         } else if (files[1] || files[2]) {
             actionBtn.textContent = "開始轉換 (Single Mode)";
@@ -95,15 +95,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (files[1] && files[2]) {
                 const sectionsA = parseLog(contents[0]);
                 const sectionsB = parseLog(contents[1]);
-                finalHtml = generateDiffReport(files[1].name, files[2].name, sectionsA, sectionsB);
-                statusDiv.textContent = "比對完成！發現差異並已標記。";
+                finalHtml = generateSideBySideDiffReport(files[1].name, files[2].name, sectionsA, sectionsB);
+                statusDiv.textContent = "比對完成！已生成左右對照表。";
             } else {
                 const content = contents[0];
                 const activeFile = files[1] || files[2];
                 const sections = parseLog(content);
                 
                 if (sections.length === 0) {
-                    throw new Error("無法識別檔案結構，請確認檔案內容符合 DIAG ([ SECTION ]) 或 STATIC (說明/指令) 格式。");
+                    throw new Error("無法識別檔案結構，請確認檔案內容符合格式。");
                 }
                 
                 finalHtml = generateSingleReport(activeFile.name, sections);
@@ -125,8 +125,6 @@ document.addEventListener('DOMContentLoaded', () => {
             actionBtn.disabled = false;
         }
     }
-
-    // --- 輔助函式 ---
 
     function readFileContent(file) {
         return new Promise((resolve, reject) => {
@@ -155,17 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return doc.body.textContent || doc.documentElement.textContent;
     }
 
-    // --- 核心解析邏輯 (升級版) ---
     function parseLog(text) {
-        // 定義兩種不同的標題特徵 (Regular Expression Signatures)
-        // 格式 A: 舊版 DIAG 格式 ([ SECTION ])
         const regexDiag = /={50,}\n\s*\[ SECTION \] (.*?)\n={50,}\n/g; 
-        
-        // 格式 B: 新版 STATIC 格式 (說明: ... 指令: ... ----)
-        // Group 1: 說明內容 (Title), Group 2: 指令內容 (Command Meta)
         const regexStatic = /={50,}\n說明:\s*(.*?)\n指令:\s*(.*?)\n-{50,}\n/g;
 
-        // 自動偵測：優先檢查是否為 Static 格式 (因為它的特徵較複雜，誤判率低)
         let regex = regexDiag;
         let isStaticFormat = false;
 
@@ -178,49 +169,40 @@ document.addEventListener('DOMContentLoaded', () => {
         let lastIndex = 0;
         let match;
 
-        // 開始正規表達式迴圈
         while ((match = regex.exec(text)) !== null) {
             const title = match[1].trim();
-            const commandMeta = isStaticFormat && match[2] ? match[2].trim() : null; // 只有 Static 格式有指令資訊
+            const commandMeta = isStaticFormat && match[2] ? match[2].trim() : null;
             
             const startIndex = match.index;
             const endIndex = regex.lastIndex;
 
-            // 1. 捕捉上一段的內容 (Body Content)
             if (startIndex > lastIndex) {
                 let content = text.substring(lastIndex, startIndex).trim();
                 
-                if (content || sections.length > 0) { // 避免檔案開頭空行
+                if (content || sections.length > 0) {
                     if (sections.length > 0) {
-                        // 將內容填入上一個 Section 物件
                         let finalContent = content;
-                        
-                        // 若上一個 Section 有指令資訊 (Static 格式)，將其加回內容頂部
                         if (sections[sections.length - 1].extraInfo) {
                             finalContent = `Command: ${sections[sections.length - 1].extraInfo}\n\n${content}`;
                         }
-                        
                         sections[sections.length - 1].content = finalContent;
                     } else {
-                        // 這是 Header (第一段之前的內容)
                         sections.push({ title: "File Header / Meta", content: content, id: "header" });
                     }
                 }
             }
             
-            // 2. 建立新的 Section 物件 (內容暫空，等下一次迴圈填入)
             const safeId = "sec-" + Math.random().toString(36).substr(2, 9);
             sections.push({ 
                 title: title, 
                 content: "", 
-                extraInfo: commandMeta, // 暫存指令資訊
+                extraInfo: commandMeta, 
                 id: safeId 
             });
             
             lastIndex = endIndex;
         }
 
-        // 3. 處理最後一段殘留的內容
         if (lastIndex < text.length) {
             const content = text.substring(lastIndex).trim();
             if (sections.length > 0) {
@@ -235,15 +217,25 @@ document.addEventListener('DOMContentLoaded', () => {
         return sections;
     }
 
-    // --- 報告生成邏輯 (單檔) ---
+    // --- 報告生成 (單檔) ---
     function generateSingleReport(filename, sections) {
         const navItems = sections.map(s => `<a href="#${s.id}" class="nav-link">${escapeHtml(s.title)}</a>`).join('');
-        const contentItems = sections.map(s => renderSectionCard(s.id, s.title, escapeHtml(s.content))).join('');
-        return renderHtmlTemplate(filename, navItems, contentItems);
+        const contentItems = sections.map(s => `
+            <div id="${s.id}" class="section-card">
+                <div class="section-header">
+                    <h2>${escapeHtml(s.title)}</h2>
+                    <button class="copy-btn" onclick="copyToClipboard('pre-${s.id}')">複製內容</button>
+                </div>
+                <div class="section-body">
+                    <pre id="pre-${s.id}">${escapeHtml(s.content)}</pre>
+                </div>
+            </div>
+        `).join('');
+        return renderHtmlTemplate(filename, navItems, contentItems, false);
     }
 
-    // --- 報告生成邏輯 (比對) ---
-    function generateDiffReport(nameA, nameB, secsA, secsB) {
+    // --- 報告生成 (左右並排比對) ---
+    function generateSideBySideDiffReport(nameA, nameB, secsA, secsB) {
         const mapA = new Map(secsA.map(s => [s.title, s.content]));
         const mapB = new Map(secsB.map(s => [s.title, s.content]));
         
@@ -257,99 +249,166 @@ document.addEventListener('DOMContentLoaded', () => {
             const contentB = mapB.get(title);
             const safeId = "diff-" + index;
             
+            let navMark = "";
+            let badge = "";
+            let diffBody = "";
             let statusClass = "";
-            let displayContent = "";
 
             if (contentA === undefined) {
                 statusClass = "status-added";
-                displayContent = `<div class="diff-block diff-add">${escapeHtml(contentB)}</div>`;
-                navHtml += `<a href="#${safeId}" class="nav-link diff-add-mark">[+] ${escapeHtml(title)}</a>`;
+                badge = `<span class="badge badge-add">New in Target</span>`;
+                navMark = `<span class="diff-mark add">[+]</span>`;
+                diffBody = renderSideBySideTable("", contentB, "add-block");
             } else if (contentB === undefined) {
                 statusClass = "status-removed";
-                displayContent = `<div class="diff-block diff-del">${escapeHtml(contentA)}</div>`;
-                navHtml += `<a href="#${safeId}" class="nav-link diff-del-mark">[-] ${escapeHtml(title)}</a>`;
+                badge = `<span class="badge badge-del">Removed in Target</span>`;
+                navMark = `<span class="diff-mark del">[-]</span>`;
+                diffBody = renderSideBySideTable(contentA, "", "del-block");
             } else if (contentA !== contentB) {
                 statusClass = "status-modified";
-                displayContent = computeLineDiff(contentA, contentB);
-                navHtml += `<a href="#${safeId}" class="nav-link diff-mod-mark">[M] ${escapeHtml(title)}</a>`;
+                badge = `<span class="badge badge-mod">Modified</span>`;
+                navMark = `<span class="diff-mark mod">[M]</span>`;
+                diffBody = computeSideBySideDiff(contentA, contentB);
             } else {
                 statusClass = "status-same";
-                displayContent = escapeHtml(contentA);
-                navHtml += `<a href="#${safeId}" class="nav-link">${escapeHtml(title)}</a>`;
+                diffBody = renderSideBySideTable(contentA, contentB, "same");
             }
 
-            contentHtml += renderSectionCard(safeId, title, displayContent, statusClass);
+            navHtml += `<a href="#${safeId}" class="nav-link">${navMark} ${escapeHtml(title)}</a>`;
+            
+            contentHtml += `
+                <div id="${safeId}" class="section-card ${statusClass}">
+                    <div class="section-header">
+                        <h2>${escapeHtml(title)} ${badge}</h2>
+                    </div>
+                    <div class="section-body no-padding">
+                        ${diffBody}
+                    </div>
+                </div>
+            `;
         });
 
         return renderHtmlTemplate(`Compare: ${nameA} vs ${nameB}`, navHtml, contentHtml, true);
     }
 
-    function computeLineDiff(textA, textB) {
+    // --- 核心演算法：左右並排且具備 Lookahead 對齊功能 ---
+    function computeSideBySideDiff(textA, textB) {
         const linesA = textA.split('\n');
         const linesB = textB.split('\n');
         
-        let html = "";
+        let htmlRows = "";
         let i = 0, j = 0;
-        
-        while(i < linesA.length || j < linesB.length) {
-            const lineA = linesA[i];
-            const lineB = linesB[j];
+        const LOOKAHEAD = 3; 
 
-            if (lineA === lineB) {
-                html += `<div>${escapeHtml(lineA || "")}</div>`;
+        while (i < linesA.length || j < linesB.length) {
+            let valA = linesA[i];
+            let valB = linesB[j];
+
+            if (valA === valB) {
+                htmlRows += createDiffRow(i+1, valA, j+1, valB, 'neutral');
                 i++; j++;
             } else {
-                if (lineA !== undefined) {
-                    html += `<div class="line-del">- ${escapeHtml(lineA)}</div>`;
-                    i++;
+                let foundInB = -1; 
+                let foundInA = -1; 
+
+                if (i < linesA.length) {
+                    for (let k = 1; k <= LOOKAHEAD; k++) {
+                        if (j + k < linesB.length && linesB[j + k] === valA) {
+                            foundInB = k;
+                            break;
+                        }
+                    }
                 }
-                if (lineB !== undefined) {
-                    html += `<div class="line-add">+ ${escapeHtml(lineB)}</div>`;
+
+                if (j < linesB.length) {
+                    for (let k = 1; k <= LOOKAHEAD; k++) {
+                        if (i + k < linesA.length && linesA[i + k] === valB) {
+                            foundInA = k;
+                            break;
+                        }
+                    }
+                }
+
+                if (foundInB !== -1) {
+                    htmlRows += createDiffRow(null, "", j+1, valB, 'add');
                     j++;
+                } else if (foundInA !== -1) {
+                    htmlRows += createDiffRow(i+1, valA, null, "", 'del');
+                    i++;
+                } else {
+                    htmlRows += createDiffRow(i+1, valA, j+1, valB, 'mod');
+                    i++; j++;
                 }
             }
         }
-        return html;
+        
+        return `<div class="diff-table">${htmlRows}</div>`;
     }
 
-    // --- HTML 模板渲染 ---
-    function renderSectionCard(id, title, contentHtml, statusClass = "") {
-        let badge = "";
-        if (statusClass === "status-added") badge = `<span class="badge badge-add">New</span>`;
-        if (statusClass === "status-removed") badge = `<span class="badge badge-del">Removed</span>`;
-        if (statusClass === "status-modified") badge = `<span class="badge badge-mod">Diff</span>`;
+    function renderSideBySideTable(fullTextA, fullTextB, type) {
+        const linesA = fullTextA ? fullTextA.split('\n') : [];
+        const linesB = fullTextB ? fullTextB.split('\n') : [];
+        const max = Math.max(linesA.length, linesB.length);
+        let html = "";
+        
+        for(let k=0; k<max; k++) {
+            let rowType = 'neutral';
+            if (type === 'add-block') rowType = 'add';
+            if (type === 'del-block') rowType = 'del';
+            
+            let numA = (type === 'add-block') ? null : (k < linesA.length ? k+1 : null);
+            let valA = (type === 'add-block') ? "" : (linesA[k] || "");
+            
+            let numB = (type === 'del-block') ? null : (k < linesB.length ? k+1 : null);
+            let valB = (type === 'del-block') ? "" : (linesB[k] || "");
 
+            html += createDiffRow(numA, valA, numB, valB, rowType);
+        }
+        return `<div class="diff-table">${html}</div>`;
+    }
+
+    function createDiffRow(numA, txtA, numB, txtB, type) {
+        let clsA = "", clsB = "";
+        if (type === 'add') { clsA = "empty"; clsB = "bg-add"; }
+        else if (type === 'del') { clsA = "bg-del"; clsB = "empty"; }
+        else if (type === 'mod') { clsA = "bg-mod-old"; clsB = "bg-mod-new"; }
+        
         return `
-            <div id="${id}" class="section-card ${statusClass}">
-                <div class="section-header">
-                    <h2>${escapeHtml(title)} ${badge}</h2>
-                    <button class="copy-btn" onclick="copyToClipboard('${id}')">複製內容</button>
-                </div>
-                <div class="section-body">
-                    <pre id="pre-${id}">${contentHtml}</pre>
-                </div>
+            <div class="diff-row">
+                <div class="diff-cell num">${numA || ""}</div>
+                <div class="diff-cell content ${clsA}">${escapeHtml(txtA || "")}</div>
+                <div class="diff-cell num">${numB || ""}</div>
+                <div class="diff-cell content ${clsB}">${escapeHtml(txtB || "")}</div>
             </div>
         `;
     }
 
-    function renderHtmlTemplate(title, navHtml, contentHtml, isDiffMode = false) {
+    function renderHtmlTemplate(title, navHtml, contentHtml, isDiffMode) {
         const dateStr = new Date().toLocaleString();
         
+        // 注意：這裡的 CSS 是給「產出的報表」用的，必須保留在 JS 內，確保下載後的檔案是獨立完整的
         const diffCss = `
-            .diff-add-mark { color: #68d391 !important; font-weight: bold; }
-            .diff-del-mark { color: #fc8181 !important; font-weight: bold; }
-            .diff-mod-mark { color: #f6ad55 !important; font-weight: bold; }
-            
-            .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; color: white; margin-left: 10px; vertical-align: middle; }
+            .diff-table { display: flex; flex-direction: column; font-family: "Menlo", "Consolas", monospace; font-size: 0.85rem; width: 100%; }
+            .diff-row { display: flex; border-bottom: 1px solid #f0f0f0; min-height: 1.5em; }
+            .diff-row:hover { background-color: #fafafa; }
+            .diff-cell { padding: 2px 4px; word-break: break-all; white-space: pre-wrap; line-height: 1.5; }
+            .diff-cell.num { width: 40px; text-align: right; color: #a0aec0; border-right: 1px solid #edf2f7; user-select: none; font-size: 0.75rem; background: #fafbfc; }
+            .diff-cell.content { flex: 1; border-right: 1px solid #edf2f7; width: 50%; }
+            .diff-cell.content:last-child { border-right: none; }
+            .bg-add { background-color: #e6fffa; color: #22543d; }
+            .bg-del { background-color: #fff5f5; color: #742a2a; }
+            .bg-mod-old { background-color: #fffaf0; color: #744210; text-decoration: line-through; opacity: 0.7; }
+            .bg-mod-new { background-color: #fffff0; color: #744210; font-weight: bold; }
+            .empty { background-color: #f7fafc; background-image: linear-gradient(45deg, #edf2f7 25%, transparent 25%, transparent 75%, #edf2f7 75%, #edf2f7), linear-gradient(45deg, #edf2f7 25%, transparent 25%, transparent 75%, #edf2f7 75%, #edf2f7); background-size: 10px 10px; background-position: 0 0, 5px 5px; }
+            .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; color: white; margin-left: 10px; vertical-align: middle; font-weight: normal; }
             .badge-add { background: #48bb78; }
             .badge-del { background: #f56565; }
             .badge-mod { background: #ed8936; }
-
-            .line-add { background-color: #e6fffa; color: #276749; display: block; width: 100%; }
-            .line-del { background-color: #fff5f5; color: #c53030; display: block; width: 100%; text-decoration: line-through; opacity: 0.8; }
-            
-            .diff-block.diff-add { background-color: #f0fff4; border: 1px solid #9ae6b4; padding: 10px; }
-            .diff-block.diff-del { background-color: #fff5f5; border: 1px solid #feb2b2; padding: 10px; opacity: 0.7; }
+            .diff-mark { display: inline-block; width: 20px; font-weight: bold; }
+            .diff-mark.add { color: #48bb78; }
+            .diff-mark.del { color: #f56565; }
+            .diff-mark.mod { color: #ed8936; }
+            .section-body.no-padding { padding: 0; }
         `;
 
         return `
@@ -359,27 +418,26 @@ document.addEventListener('DOMContentLoaded', () => {
     <meta charset="UTF-8">
     <title>${title}</title>
     <style>
-        :root { --sidebar-width: 300px; --primary: #2b6cb0; --bg: #f7fafc; --text: #2d3748; }
-        body { margin: 0; display: flex; height: 100vh; font-family: Consolas, Monaco, "Courier New", monospace; color: var(--text); background: var(--bg); overflow: hidden; }
-        aside { width: var(--sidebar-width); background: #1a202c; color: #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; }
+        :root { --sidebar-width: 320px; --primary: #2b6cb0; --bg: #f7fafc; --text: #2d3748; }
+        body { margin: 0; display: flex; height: 100vh; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); overflow: hidden; }
+        aside { width: var(--sidebar-width); background: #1a202c; color: #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; border-right: 1px solid #4a5568; }
         .nav-header { padding: 1.5rem; background: #2d3748; border-bottom: 1px solid #4a5568; }
         .nav-header h3 { margin: 0; font-size: 1rem; color: white; word-break: break-all; }
         .nav-list { flex: 1; overflow-y: auto; padding: 1rem 0; }
         .nav-link { display: block; padding: 0.75rem 1.5rem; color: #cbd5e0; text-decoration: none; font-size: 0.85rem; border-left: 3px solid transparent; transition: 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .nav-link:hover { background: #2d3748; color: white; }
-        
         main { flex: 1; overflow-y: auto; padding: 2rem; scroll-behavior: smooth; position: relative; }
         .section-card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 2rem; border: 1px solid #e2e8f0; overflow: hidden; }
         .section-header { background: #edf2f7; padding: 0.75rem 1.5rem; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
         .section-header h2 { margin: 0; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; }
         .copy-btn { background: white; border: 1px solid #cbd5e0; padding: 4px 12px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; }
-        
         .section-body { padding: 0; overflow-x: auto; }
-        pre { margin: 0; padding: 1.5rem; font-size: 0.85rem; line-height: 1.5; color: #1a202c; white-space: pre-wrap; word-wrap: break-word; }
-        
-        ${diffCss}
-        
-        @media (max-width: 768px) { body { flex-direction: column; } aside { width: 100%; height: 200px; } }
+        pre { margin: 0; padding: 1.5rem; font-size: 0.85rem; line-height: 1.5; color: #1a202c; white-space: pre-wrap; word-wrap: break-word; font-family: "Menlo", "Consolas", monospace; }
+        ${isDiffMode ? diffCss : ''}
+        @media (max-width: 1024px) { 
+            body { flex-direction: column; } 
+            aside { width: 100%; height: 200px; } 
+        }
     </style>
 </head>
 <body>
@@ -398,11 +456,13 @@ document.addEventListener('DOMContentLoaded', () => {
     </main>
     <script>
         function copyToClipboard(id) {
-            const el = document.getElementById('pre-' + id);
-            const text = el.innerText; 
-            navigator.clipboard.writeText(text).then(() => {
-                alert('內容已複製');
-            });
+            const el = document.getElementById(id);
+            if(el) {
+                const text = el.innerText; 
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('內容已複製');
+                });
+            }
         }
     <\/script>
 </body>
