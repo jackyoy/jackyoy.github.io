@@ -5,14 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const actionBtn = document.getElementById('actionBtn');
     const statusDiv = document.getElementById('status');
     
-    let files = [null, null, null]; // index 1 and 2
+    let files = [null, null, null]; 
     let downloadUrl = null;
 
-    // --- UI 互動邏輯 ---
+    // --- UI 互動邏輯 (保持不變) ---
     window.triggerFile = (idx) => fileInputs[idx].click();
     
     window.clearFile = (idx, event) => {
-        event.stopPropagation(); // 防止觸發上傳點擊
+        event.stopPropagation();
         fileInputs[idx].value = '';
         files[idx] = null;
         updateUIState(idx);
@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function updateUIState(idx) {
-        // 更新個別區塊樣式
         if (files[idx]) {
             fileNames[idx].textContent = files[idx].name;
             fileNames[idx].style.color = "#2d3748";
@@ -39,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
             areas[idx].classList.remove('has-file');
         }
 
-        // 更新按鈕狀態
         if (files[1] && files[2]) {
             actionBtn.textContent = "開始比對 (Compare)";
             actionBtn.disabled = false;
@@ -51,7 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
             actionBtn.disabled = true;
         }
         
-        // 重置下載狀態
         actionBtn.classList.remove('download');
         if (downloadUrl) {
             URL.revokeObjectURL(downloadUrl);
@@ -87,7 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
         statusDiv.textContent = "正在讀取並解析檔案...";
 
         try {
-            // 讀取檔案 (使用 Promise 封裝)
             const readPromises = [];
             if (files[1]) readPromises.push(readFileContent(files[1]));
             if (files[2]) readPromises.push(readFileContent(files[2]));
@@ -97,17 +93,19 @@ document.addEventListener('DOMContentLoaded', () => {
             let finalHtml = "";
 
             if (files[1] && files[2]) {
-                // 雙檔模式：比對
                 const sectionsA = parseLog(contents[0]);
                 const sectionsB = parseLog(contents[1]);
                 finalHtml = generateDiffReport(files[1].name, files[2].name, sectionsA, sectionsB);
                 statusDiv.textContent = "比對完成！發現差異並已標記。";
             } else {
-                // 單檔模式：原功能
                 const content = contents[0];
                 const activeFile = files[1] || files[2];
                 const sections = parseLog(content);
-                if (sections.length === 0) throw new Error("無法識別結構，請確認檔案包含 '[ SECTION ]'");
+                
+                if (sections.length === 0) {
+                    throw new Error("無法識別檔案結構，請確認檔案內容符合 DIAG ([ SECTION ]) 或 STATIC (說明/指令) 格式。");
+                }
+                
                 finalHtml = generateSingleReport(activeFile.name, sections);
                 statusDiv.textContent = `解析成功！共 ${sections.length} 個區塊。`;
             }
@@ -135,7 +133,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 let text = e.target.result;
-                // 簡易 HTML 轉文字處理
                 if (file.name.match(/\.html?$/i)) {
                     text = extractTextFromHtml(text);
                 }
@@ -158,39 +155,88 @@ document.addEventListener('DOMContentLoaded', () => {
         return doc.body.textContent || doc.documentElement.textContent;
     }
 
+    // --- 核心解析邏輯 (升級版) ---
     function parseLog(text) {
-        const regex = /={50,}\n\s*\[ SECTION \] (.*?)\n={50,}\n/g;
+        // 定義兩種不同的標題特徵 (Regular Expression Signatures)
+        // 格式 A: 舊版 DIAG 格式 ([ SECTION ])
+        const regexDiag = /={50,}\n\s*\[ SECTION \] (.*?)\n={50,}\n/g; 
+        
+        // 格式 B: 新版 STATIC 格式 (說明: ... 指令: ... ----)
+        // Group 1: 說明內容 (Title), Group 2: 指令內容 (Command Meta)
+        const regexStatic = /={50,}\n說明:\s*(.*?)\n指令:\s*(.*?)\n-{50,}\n/g;
+
+        // 自動偵測：優先檢查是否為 Static 格式 (因為它的特徵較複雜，誤判率低)
+        let regex = regexDiag;
+        let isStaticFormat = false;
+
+        if (text.search(regexStatic) !== -1) {
+            regex = regexStatic;
+            isStaticFormat = true;
+        }
+
         const sections = [];
         let lastIndex = 0;
         let match;
 
+        // 開始正規表達式迴圈
         while ((match = regex.exec(text)) !== null) {
             const title = match[1].trim();
+            const commandMeta = isStaticFormat && match[2] ? match[2].trim() : null; // 只有 Static 格式有指令資訊
+            
             const startIndex = match.index;
             const endIndex = regex.lastIndex;
 
+            // 1. 捕捉上一段的內容 (Body Content)
             if (startIndex > lastIndex) {
-                const content = text.substring(lastIndex, startIndex).trim();
-                if (content && sections.length === 0) {
-                    sections.push({ title: "File Header / Meta", content: content, id: "header" });
-                } else if (content && sections.length > 0) {
-                     sections[sections.length - 1].content = content;
+                let content = text.substring(lastIndex, startIndex).trim();
+                
+                if (content || sections.length > 0) { // 避免檔案開頭空行
+                    if (sections.length > 0) {
+                        // 將內容填入上一個 Section 物件
+                        let finalContent = content;
+                        
+                        // 若上一個 Section 有指令資訊 (Static 格式)，將其加回內容頂部
+                        if (sections[sections.length - 1].extraInfo) {
+                            finalContent = `Command: ${sections[sections.length - 1].extraInfo}\n\n${content}`;
+                        }
+                        
+                        sections[sections.length - 1].content = finalContent;
+                    } else {
+                        // 這是 Header (第一段之前的內容)
+                        sections.push({ title: "File Header / Meta", content: content, id: "header" });
+                    }
                 }
             }
+            
+            // 2. 建立新的 Section 物件 (內容暫空，等下一次迴圈填入)
             const safeId = "sec-" + Math.random().toString(36).substr(2, 9);
-            sections.push({ title: title, content: "", id: safeId });
+            sections.push({ 
+                title: title, 
+                content: "", 
+                extraInfo: commandMeta, // 暫存指令資訊
+                id: safeId 
+            });
+            
             lastIndex = endIndex;
         }
+
+        // 3. 處理最後一段殘留的內容
         if (lastIndex < text.length) {
             const content = text.substring(lastIndex).trim();
-            if (sections.length > 0) sections[sections.length - 1].content = content;
+            if (sections.length > 0) {
+                let finalContent = content;
+                if (sections[sections.length - 1].extraInfo) {
+                    finalContent = `Command: ${sections[sections.length - 1].extraInfo}\n\n${content}`;
+                }
+                sections[sections.length - 1].content = finalContent;
+            }
         }
+
         return sections;
     }
 
     // --- 報告生成邏輯 (單檔) ---
     function generateSingleReport(filename, sections) {
-        // 沿用原本的邏輯，但為了程式碼共用性，這裡直接調用模板
         const navItems = sections.map(s => `<a href="#${s.id}" class="nav-link">${escapeHtml(s.title)}</a>`).join('');
         const contentItems = sections.map(s => renderSectionCard(s.id, s.title, escapeHtml(s.content))).join('');
         return renderHtmlTemplate(filename, navItems, contentItems);
@@ -201,7 +247,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const mapA = new Map(secsA.map(s => [s.title, s.content]));
         const mapB = new Map(secsB.map(s => [s.title, s.content]));
         
-        // 取得所有唯一的標題
         const allTitles = Array.from(new Set([...mapA.keys(), ...mapB.keys()]));
         
         let navHtml = "";
@@ -216,22 +261,18 @@ document.addEventListener('DOMContentLoaded', () => {
             let displayContent = "";
 
             if (contentA === undefined) {
-                // 新增的區塊 (只在 B 有)
                 statusClass = "status-added";
                 displayContent = `<div class="diff-block diff-add">${escapeHtml(contentB)}</div>`;
                 navHtml += `<a href="#${safeId}" class="nav-link diff-add-mark">[+] ${escapeHtml(title)}</a>`;
             } else if (contentB === undefined) {
-                // 刪除的區塊 (只在 A 有)
                 statusClass = "status-removed";
                 displayContent = `<div class="diff-block diff-del">${escapeHtml(contentA)}</div>`;
                 navHtml += `<a href="#${safeId}" class="nav-link diff-del-mark">[-] ${escapeHtml(title)}</a>`;
             } else if (contentA !== contentB) {
-                // 內容變更 -> 執行行比對
                 statusClass = "status-modified";
                 displayContent = computeLineDiff(contentA, contentB);
                 navHtml += `<a href="#${safeId}" class="nav-link diff-mod-mark">[M] ${escapeHtml(title)}</a>`;
             } else {
-                // 內容相同
                 statusClass = "status-same";
                 displayContent = escapeHtml(contentA);
                 navHtml += `<a href="#${safeId}" class="nav-link">${escapeHtml(title)}</a>`;
@@ -243,29 +284,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return renderHtmlTemplate(`Compare: ${nameA} vs ${nameB}`, navHtml, contentHtml, true);
     }
 
-    // --- 簡易行比對演算法 (Diff) ---
     function computeLineDiff(textA, textB) {
         const linesA = textA.split('\n');
         const linesB = textB.split('\n');
         
-        // 這裡使用簡單的 "Naive" 比對：
-        // 如果完全不同，展示 Unified Diff 風格
-        // 為了效能與實作複雜度，不做複雜的 Myers Diff (LCS)，而是做「對應行」標示
-        
         let html = "";
         let i = 0, j = 0;
         
-        // 簡單比較邏輯
         while(i < linesA.length || j < linesB.length) {
             const lineA = linesA[i];
             const lineB = linesB[j];
 
             if (lineA === lineB) {
-                html += `<div>${escapeHtml(lineA || "")}</div>`; // 相同，一般顯示
+                html += `<div>${escapeHtml(lineA || "")}</div>`;
                 i++; j++;
             } else {
-                // 嘗試找尋是否存在於後方 (簡單的同步嘗試)
-                // 這裡簡化處理：直接顯示 A 為紅，B 為綠
                 if (lineA !== undefined) {
                     html += `<div class="line-del">- ${escapeHtml(lineA)}</div>`;
                     i++;
@@ -282,9 +315,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- HTML 模板渲染 ---
     function renderSectionCard(id, title, contentHtml, statusClass = "") {
         let badge = "";
-        if (statusClass === "status-added") badge = `<span class="badge badge-add">New Section</span>`;
-        if (statusClass === "status-removed") badge = `<span class="badge badge-del">Removed Section</span>`;
-        if (statusClass === "status-modified") badge = `<span class="badge badge-mod">Modified</span>`;
+        if (statusClass === "status-added") badge = `<span class="badge badge-add">New</span>`;
+        if (statusClass === "status-removed") badge = `<span class="badge badge-del">Removed</span>`;
+        if (statusClass === "status-modified") badge = `<span class="badge badge-mod">Diff</span>`;
 
         return `
             <div id="${id}" class="section-card ${statusClass}">
@@ -302,7 +335,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderHtmlTemplate(title, navHtml, contentHtml, isDiffMode = false) {
         const dateStr = new Date().toLocaleString();
         
-        // 額外的 CSS 用於 Diff 樣式
         const diffCss = `
             .diff-add-mark { color: #68d391 !important; font-weight: bold; }
             .diff-del-mark { color: #fc8181 !important; font-weight: bold; }
@@ -367,7 +399,6 @@ document.addEventListener('DOMContentLoaded', () => {
     <script>
         function copyToClipboard(id) {
             const el = document.getElementById('pre-' + id);
-            // 若為 Diff 模式，只複製純文字，不複製 HTML 標籤
             const text = el.innerText; 
             navigator.clipboard.writeText(text).then(() => {
                 alert('內容已複製');
