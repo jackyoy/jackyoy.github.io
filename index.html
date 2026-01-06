@@ -3,247 +3,262 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TXT 檔案解析工具模板</title>
+    <title>系統診斷日誌轉換器</title>
     <style>
-        /* 基礎樣式重置與版面設定 */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f4f4f9;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
+        /* --- 基礎樣式 (轉換器介面) --- */
+        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; max-width: 450px; width: 90%; }
+        h1 { color: #2d3748; margin-bottom: 0.5rem; font-size: 1.5rem; }
+        p { color: #718096; margin-bottom: 2rem; font-size: 0.95rem; }
+        
+        .upload-area { border: 2px dashed #cbd5e0; border-radius: 8px; padding: 2rem; cursor: pointer; transition: 0.2s; margin-bottom: 1.5rem; }
+        .upload-area:hover { border-color: #4299e1; background-color: #ebf8ff; }
+        .upload-icon { font-size: 2rem; color: #4299e1; margin-bottom: 0.5rem; }
+        
+        button { background-color: #4299e1; color: white; border: none; padding: 0.8rem 2rem; border-radius: 6px; font-size: 1rem; cursor: pointer; transition: 0.2s; width: 100%; font-weight: 600; }
+        button:disabled { background-color: #a0aec0; cursor: not-allowed; }
+        button:hover:not(:disabled) { background-color: #3182ce; }
+        button.download { background-color: #48bb78; }
+        button.download:hover { background-color: #38a169; }
 
-        /* 卡片容器樣式 */
-        .container {
-            background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
-
-        h1 {
-            font-size: 1.5rem;
-            color: #333;
-            margin-bottom: 0.5rem;
-        }
-
-        p {
-            color: #666;
-            font-size: 0.9rem;
-            margin-bottom: 1.5rem;
-        }
-
-        /* 檔案上傳區塊樣式 */
-        .upload-box {
-            border: 2px dashed #cbd5e0;
-            border-radius: 8px;
-            padding: 2rem 1rem;
-            margin-bottom: 1.5rem;
-            cursor: pointer;
-            transition: border-color 0.3s;
-        }
-
-        .upload-box:hover {
-            border-color: #4299e1;
-        }
-
-        /* 隱藏原始 input，用 label 來美化 */
-        input[type="file"] {
-            display: none;
-        }
-
-        .file-label {
-            display: block;
-            color: #4a5568;
-            font-weight: 500;
-            cursor: pointer;
-        }
-
-        .file-name {
-            display: block;
-            margin-top: 0.5rem;
-            font-size: 0.85rem;
-            color: #2b6cb0;
-        }
-
-        /* 操作按鈕樣式 */
-        .action-btn {
-            background-color: #4299e1;
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 6px;
-            font-size: 1rem;
-            cursor: pointer;
-            width: 100%;
-            transition: background-color 0.2s;
-        }
-
-        .action-btn:disabled {
-            background-color: #a0aec0;
-            cursor: not-allowed;
-        }
-
-        .action-btn:hover:not(:disabled) {
-            background-color: #3182ce;
-        }
-
-        /* 下載按鈕的特定樣式 */
-        .action-btn.download-mode {
-            background-color: #48bb78;
-        }
-        .action-btn.download-mode:hover {
-            background-color: #38a169;
-        }
-
-        /* 狀態文字 */
-        .status-text {
-            margin-top: 1rem;
-            font-size: 0.85rem;
-            color: #718096;
-            height: 1.2em; /* 預留高度避免跳動 */
-        }
+        #status { margin-top: 1rem; font-size: 0.9rem; color: #4a5568; min-height: 1.5em; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>檔案解析工具</h1>
-        <p>請上傳 .txt 檔案，系統將自動進行格式整理。</p>
+    <div class="card">
+        <h1>系統日誌視覺化工具</h1>
+        <p>將純文字的 FULL_DIAG 檔案轉換為好讀的 HTML 報告。</p>
 
-        <div class="upload-box" onclick="document.getElementById('fileInput').click()">
-            <input type="file" id="fileInput" accept=".txt">
-            <label for="fileInput" class="file-label">
-                點擊此處選擇檔案
-                <span id="fileNameDisplay" class="file-name"></span>
-            </label>
+        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">📂</div>
+            <div id="fileName">點擊上傳 .txt 檔案</div>
+            <input type="file" id="fileInput" accept=".txt" style="display: none;">
         </div>
 
-        <button id="actionBtn" class="action-btn" disabled>開始解析</button>
-        
-        <div id="statusText" class="status-text"></div>
+        <button id="actionBtn" disabled>開始轉換</button>
+        <div id="status"></div>
     </div>
 
     <script>
-        // DOM 元素選取
         const fileInput = document.getElementById('fileInput');
-        const fileNameDisplay = document.getElementById('fileNameDisplay');
         const actionBtn = document.getElementById('actionBtn');
-        const statusText = document.getElementById('statusText');
+        const statusDiv = document.getElementById('status');
+        const fileNameDiv = document.getElementById('fileName');
+        let selectedFile = null;
+        let downloadUrl = null;
 
-        // 變數存儲
-        let currentFile = null;
-        let processedBlobUrl = null;
-        let isProcessed = false; // 狀態標記
-
-        // 1. 監聽檔案選擇
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                currentFile = e.target.files[0];
+                selectedFile = e.target.files[0];
+                fileNameDiv.textContent = selectedFile.name;
+                fileNameDiv.style.color = "#2d3748";
+                actionBtn.disabled = false;
+                actionBtn.textContent = "開始轉換";
+                actionBtn.className = ""; 
+                if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+            }
+        });
+
+        actionBtn.addEventListener('click', () => {
+            if (actionBtn.classList.contains('download')) {
+                // 下載模式
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = selectedFile.name.replace('.txt', '_report.html');
+                a.click();
+            } else {
+                // 轉換模式
+                processFile();
+            }
+        });
+
+        function processFile() {
+            actionBtn.disabled = true;
+            actionBtn.textContent = "處理中...";
+            statusDiv.textContent = "正在解析日誌結構...";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
                 
-                // 驗證檔案類型 (雙重防護，除了 accept 屬性外再檢查一次)
-                if (currentFile.type !== "text/plain" && !currentFile.name.endsWith('.txt')) {
-                    alert("僅支援 .txt 檔案格式");
-                    resetUI();
-                    return;
+                try {
+                    // 1. 解析檔案
+                    const sections = parseLog(text);
+                    
+                    if (sections.length === 0) {
+                        throw new Error("無法識別檔案格式，請確認是否為標準 DIAG 檔案。");
+                    }
+
+                    // 2. 生成 HTML 報告字串
+                    const reportHtml = generateReportHtml(selectedFile.name, sections);
+
+                    // 3. 建立 Blob 下載連結
+                    const blob = new Blob([reportHtml], { type: 'text/html' });
+                    downloadUrl = URL.createObjectURL(blob);
+
+                    // 4. 更新 UI
+                    actionBtn.textContent = "下載 HTML 報告";
+                    actionBtn.classList.add('download');
+                    actionBtn.disabled = false;
+                    statusDiv.textContent = `成功解析 ${sections.length} 個區塊！`;
+
+                } catch (err) {
+                    statusDiv.textContent = "錯誤: " + err.message;
+                    statusDiv.style.color = "red";
+                    actionBtn.textContent = "重試";
+                    actionBtn.disabled = false;
+                }
+            };
+            reader.readAsText(selectedFile);
+        }
+
+        // --- 核心解析邏輯 ---
+        function parseLog(text) {
+            // 定義分隔線正則表達式：80個等號，換行，[ SECTION ] 標題，再換行，80個等號
+            // 使用 capturing group ( ) 來保留標題
+            const regex = /={50,}\n\s*\[ SECTION \] (.*?)\n={50,}\n/g;
+            
+            const sections = [];
+            let lastIndex = 0;
+            let match;
+
+            // 如果檔案開頭沒有分隔線，將開頭視為 "Preamble"
+            // 我們使用 exec 循環尋找所有標題
+            while ((match = regex.exec(text)) !== null) {
+                const title = match[1].trim(); // 標題
+                const startIndex = match.index;
+                const endIndex = regex.lastIndex;
+
+                // 捕捉前一段內容 (如果是第一段，就是 header 之前的內容)
+                if (startIndex > lastIndex) {
+                    const content = text.substring(lastIndex, startIndex).trim();
+                    if (content) {
+                        // 只有當這不是第一段或者有內容時才添加
+                        if (sections.length > 0) {
+                            sections[sections.length - 1].content = content;
+                        } else {
+                            // 這是檔案最開頭的資訊 (如果有)
+                            sections.push({ title: "File Header / Meta", content: content, id: "header" });
+                        }
+                    }
                 }
 
-                // 更新 UI
-                fileNameDisplay.textContent = `已選擇: ${currentFile.name}`;
-                actionBtn.disabled = false;
-                resetButtonToParseMode(); // 若重新選檔，按鈕要重置回「解析」狀態
-            }
-        });
-
-        // 2. 監聽按鈕點擊
-        actionBtn.addEventListener('click', () => {
-            if (isProcessed) {
-                // 如果已經處理完，這個按鈕的功能就是「下載」
-                handleDownload();
-            } else {
-                // 否則，這個按鈕的功能是「解析」
-                handleProcess();
-            }
-        });
-
-        // 處理邏輯 (Mock)
-        function handleProcess() {
-            // UI 狀態：處理中
-            actionBtn.disabled = true;
-            actionBtn.textContent = "資料解析中...";
-            statusText.textContent = "正在讀取並轉換資料結構...";
-
-            // 模擬異步處理時間 (1.5秒)
-            setTimeout(() => {
-                // --- 這裡未來放置真正的解析邏輯 ---
-                // 目前僅做簡單模擬：讀取檔案，並不做修改，直接準備好下載
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const originalContent = e.target.result;
-                    
-                    // 模擬產出新內容
-                    const newContent = originalContent; 
-
-                    // 建立下載連結 Blob
-                    const blob = new Blob([newContent], { type: 'text/plain' });
-                    if (processedBlobUrl) URL.revokeObjectURL(processedBlobUrl); // 清除舊記憶體
-                    processedBlobUrl = URL.createObjectURL(blob);
-
-                    // UI 狀態：處理完成，切換為下載模式
-                    changeButtonToDownloadMode();
-                };
-                reader.readAsText(currentFile);
+                // 準備新的區塊，等待下一次循環填入 content
+                // 產生一個安全的 ID 用於錨點
+                const safeId = "sec-" + Math.random().toString(36).substr(2, 9);
+                sections.push({ title: title, content: "", id: safeId });
                 
-            }, 1500);
-        }
-
-        // 下載邏輯
-        function handleDownload() {
-            const tempLink = document.createElement('a');
-            tempLink.href = processedBlobUrl;
-            // 設定下載檔名，這裡範例為 "processed_" + 原檔名
-            tempLink.download = `processed_${currentFile.name}`;
-            document.body.appendChild(tempLink);
-            tempLink.click();
-            document.body.removeChild(tempLink);
-            
-            statusText.textContent = "下載已開始";
-        }
-
-        // 輔助函式：切換按鈕為下載模式
-        function changeButtonToDownloadMode() {
-            isProcessed = true;
-            actionBtn.disabled = false;
-            actionBtn.textContent = "下載處理後的檔案";
-            actionBtn.classList.add('download-mode');
-            statusText.textContent = "解析完成！";
-        }
-
-        // 輔助函式：重置按鈕為解析模式
-        function resetButtonToParseMode() {
-            isProcessed = false;
-            actionBtn.textContent = "開始解析";
-            actionBtn.classList.remove('download-mode');
-            statusText.textContent = "";
-            if (processedBlobUrl) {
-                URL.revokeObjectURL(processedBlobUrl);
-                processedBlobUrl = null;
+                lastIndex = endIndex;
             }
+
+            // 捕捉最後一段內容
+            if (lastIndex < text.length) {
+                const content = text.substring(lastIndex).trim();
+                if (sections.length > 0) {
+                    sections[sections.length - 1].content = content;
+                }
+            }
+
+            return sections;
         }
 
-        // 輔助函式：重置整個 UI
-        function resetUI() {
-            fileInput.value = '';
-            currentFile = null;
-            fileNameDisplay.textContent = '';
-            actionBtn.disabled = true;
-            resetButtonToParseMode();
+        // --- HTML 報告生成器 (內嵌 CSS/JS) ---
+        function generateReportHtml(filename, sections) {
+            const dateStr = new Date().toLocaleString();
+            
+            // 生成導航選單 HTML
+            const navHtml = sections.map(sec => 
+                `<a href="#${sec.id}" class="nav-link">${sec.title}</a>`
+            ).join('');
+
+            // 生成主要內容 HTML
+            const contentHtml = sections.map(sec => `
+                <div id="${sec.id}" class="section-card">
+                    <div class="section-header">
+                        <h2>${sec.title}</h2>
+                        <button class="copy-btn" onclick="copyToClipboard('${sec.id}')">複製內容</button>
+                    </div>
+                    <div class="section-body">
+                        <pre id="pre-${sec.id}">${escapeHtml(sec.content)}</pre>
+                    </div>
+                </div>
+            `).join('');
+
+            return `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>報告: ${filename}</title>
+    <style>
+        :root { --sidebar-width: 280px; --primary: #2b6cb0; --bg: #f7fafc; --text: #2d3748; }
+        body { margin: 0; display: flex; height: 100vh; font-family: Consolas, Monaco, "Courier New", monospace; color: var(--text); background: var(--bg); overflow: hidden; }
+        
+        /* 側邊導航 */
+        aside { width: var(--sidebar-width); background: #1a202c; color: #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; }
+        .nav-header { padding: 1.5rem; background: #2d3748; border-bottom: 1px solid #4a5568; }
+        .nav-header h3 { margin: 0; font-size: 1rem; color: white; word-break: break-all; }
+        .nav-header span { font-size: 0.75rem; color: #a0aec0; }
+        .nav-list { flex: 1; overflow-y: auto; padding: 1rem 0; }
+        .nav-link { display: block; padding: 0.75rem 1.5rem; color: #cbd5e0; text-decoration: none; font-size: 0.85rem; border-left: 3px solid transparent; transition: 0.2s; }
+        .nav-link:hover { background: #2d3748; color: white; }
+        .nav-link:focus { outline: none; background: #2d3748; }
+        
+        /* 主要內容區 */
+        main { flex: 1; overflow-y: auto; padding: 2rem; scroll-behavior: smooth; position: relative; }
+        
+        .section-card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 2rem; border: 1px solid #e2e8f0; overflow: hidden; }
+        .section-header { background: #edf2f7; padding: 0.75rem 1.5rem; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; }
+        .section-header h2 { margin: 0; font-size: 1.1rem; color: var(--primary); }
+        .copy-btn { background: white; border: 1px solid #cbd5e0; padding: 4px 12px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; }
+        .copy-btn:hover { background: #ebf8ff; color: var(--primary); border-color: var(--primary); }
+        
+        .section-body { padding: 0; overflow-x: auto; }
+        pre { margin: 0; padding: 1.5rem; font-size: 0.85rem; line-height: 1.5; color: #1a202c; }
+        
+        /* 響應式 */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            aside { width: 100%; height: 200px; }
+        }
+    </style>
+</head>
+<body>
+    <aside>
+        <div class="nav-header">
+            <h3>${filename}</h3>
+            <span>生成於: ${dateStr}</span>
+        </div>
+        <nav class="nav-list">
+            ${navHtml}
+        </nav>
+    </aside>
+    <main>
+        ${contentHtml}
+        <div style="text-align: center; color: #a0aec0; padding: 2rem;">End of Report</div>
+    </main>
+    <script>
+        function copyToClipboard(id) {
+            const text = document.getElementById('pre-' + id).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('內容已複製');
+            });
+        }
+    </script>
+</body>
+</html>`;
+        }
+
+        // 輔助函式：跳脫 HTML 特殊字元防止 XSS
+        function escapeHtml(text) {
+            if (!text) return "";
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
         }
     </script>
 </body>
