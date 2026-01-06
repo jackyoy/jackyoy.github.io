@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (files[1] && files[2]) {
-            actionBtn.textContent = "開始左右比對 (Side-by-Side)";
+            actionBtn.textContent = "開始精準比對 (Git-Diff Mode)";
             actionBtn.disabled = false;
         } else if (files[1] || files[2]) {
             actionBtn.textContent = "開始轉換 (Single Mode)";
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let baseName = "report";
             if (files[1] && files[2]) {
-                baseName = `Compare_${files[1].name}_vs_${files[2].name}`;
+                baseName = `Diff_${files[1].name}_vs_${files[2].name}`;
             } else {
                 const f = files[1] || files[2];
                 baseName = f.name.replace(/\.(txt|html|htm)$/i, '') + '_report';
@@ -74,15 +74,15 @@ document.addEventListener('DOMContentLoaded', () => {
             a.download = baseName + '.html';
             a.click();
         } else {
-            processFiles();
+            // 使用 setTimeout 讓 UI 有機會更新 "處理中" 狀態
+            statusDiv.textContent = "正在進行全域 Diff 運算...";
+            actionBtn.disabled = true;
+            actionBtn.textContent = "運算中...";
+            setTimeout(processFiles, 50);
         }
     });
 
     async function processFiles() {
-        actionBtn.disabled = true;
-        actionBtn.textContent = "處理運算中...";
-        statusDiv.textContent = "正在讀取並解析檔案...";
-
         try {
             const readPromises = [];
             if (files[1]) readPromises.push(readFileContent(files[1]));
@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const sectionsA = parseLog(contents[0]);
                 const sectionsB = parseLog(contents[1]);
                 finalHtml = generateSideBySideDiffReport(files[1].name, files[2].name, sectionsA, sectionsB);
-                statusDiv.textContent = "比對完成！已生成左右對照表。";
+                statusDiv.textContent = "比對完成！已使用 Myers 演算法校準差異。";
             } else {
                 const content = contents[0];
                 const activeFile = files[1] || files[2];
@@ -153,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return doc.body.textContent || doc.documentElement.textContent;
     }
 
+    // --- 核心解析邏輯 ---
     function parseLog(text) {
         const regexDiag = /={50,}\n\s*\[ SECTION \] (.*?)\n={50,}\n/g; 
         const regexStatic = /={50,}\n說明:\s*(.*?)\n指令:\s*(.*?)\n-{50,}\n/g;
@@ -172,13 +173,11 @@ document.addEventListener('DOMContentLoaded', () => {
         while ((match = regex.exec(text)) !== null) {
             const title = match[1].trim();
             const commandMeta = isStaticFormat && match[2] ? match[2].trim() : null;
-            
             const startIndex = match.index;
             const endIndex = regex.lastIndex;
 
             if (startIndex > lastIndex) {
                 let content = text.substring(lastIndex, startIndex).trim();
-                
                 if (content || sections.length > 0) {
                     if (sections.length > 0) {
                         let finalContent = content;
@@ -193,13 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             const safeId = "sec-" + Math.random().toString(36).substr(2, 9);
-            sections.push({ 
-                title: title, 
-                content: "", 
-                extraInfo: commandMeta, 
-                id: safeId 
-            });
-            
+            sections.push({ title: title, content: "", extraInfo: commandMeta, id: safeId });
             lastIndex = endIndex;
         }
 
@@ -213,25 +206,87 @@ document.addEventListener('DOMContentLoaded', () => {
                 sections[sections.length - 1].content = finalContent;
             }
         }
-
         return sections;
     }
 
-    // --- 報告生成 (單檔) ---
-    function generateSingleReport(filename, sections) {
-        const navItems = sections.map(s => `<a href="#${s.id}" class="nav-link">${escapeHtml(s.title)}</a>`).join('');
-        const contentItems = sections.map(s => `
-            <div id="${s.id}" class="section-card">
-                <div class="section-header">
-                    <h2>${escapeHtml(s.title)}</h2>
-                    <button class="copy-btn" onclick="copyToClipboard('pre-${s.id}')">複製內容</button>
-                </div>
-                <div class="section-body">
-                    <pre id="pre-${s.id}">${escapeHtml(s.content)}</pre>
-                </div>
-            </div>
-        `).join('');
-        return renderHtmlTemplate(filename, navItems, contentItems, false);
+    // --- Diff 演算法核心 (Myers Algorithm Implementation) ---
+    // 這是解決錯位問題的關鍵。它能找到「最短編輯距離」，保證相同內容一定會對齊。
+    function myersDiff(linesA, linesB) {
+        const N = linesA.length;
+        const M = linesB.length;
+        const max = N + M;
+        const v = new Int32Array(2 * max + 1);
+        v[max + 1] = 0;
+        const trace = [];
+
+        for (let d = 0; d <= max; d++) {
+            const vClone = new Int32Array(v); // 備份每一步的狀態，用於回溯路徑
+            trace.push(vClone);
+            
+            for (let k = -d; k <= d; k += 2) {
+                let x, y;
+                if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) {
+                    x = v[max + k + 1];
+                } else {
+                    x = v[max + k - 1] + 1;
+                }
+                y = x - k;
+
+                while (x < N && y < M && linesA[x] === linesB[y]) {
+                    x++;
+                    y++;
+                }
+
+                v[max + k] = x;
+
+                if (x >= N && y >= M) {
+                    return buildDiffScript(trace, linesA, linesB);
+                }
+            }
+        }
+        return []; // Should not happen
+    }
+
+    function buildDiffScript(trace, linesA, linesB) {
+        const N = linesA.length;
+        const M = linesB.length;
+        const max = N + M;
+        
+        let x = N;
+        let y = M;
+        let changes = [];
+
+        // 回溯找出路徑
+        for (let d = trace.length - 1; d >= 0; d--) {
+            const v = trace[d];
+            const k = x - y;
+            
+            let prevK;
+            if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) {
+                prevK = k + 1;
+            } else {
+                prevK = k - 1;
+            }
+            
+            let prevX = v[max + prevK];
+            let prevY = prevX - prevK;
+
+            while (x > prevX && y > prevY) {
+                changes.unshift({ type: 'eq', line: linesA[x - 1], lineA: x, lineB: y });
+                x--; y--;
+            }
+
+            if (d > 0) {
+                if (x === prevX) {
+                    changes.unshift({ type: 'ins', line: linesB[y - 1], lineB: y });
+                    y--;
+                } else {
+                    changes.unshift({ type: 'del', line: linesA[x - 1], lineA: x });
+                    x--;
+                }
+            }
+        }
+        return changes;
     }
 
     // --- 報告生成 (左右並排比對) ---
@@ -258,24 +313,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 statusClass = "status-added";
                 badge = `<span class="badge badge-add">New in Target</span>`;
                 navMark = `<span class="diff-mark add">[+]</span>`;
-                diffBody = renderSideBySideTable("", contentB, "add-block");
+                diffBody = renderDiffTableFromScript([{type: 'block-add', text: contentB}]);
             } else if (contentB === undefined) {
                 statusClass = "status-removed";
                 badge = `<span class="badge badge-del">Removed in Target</span>`;
                 navMark = `<span class="diff-mark del">[-]</span>`;
-                diffBody = renderSideBySideTable(contentA, "", "del-block");
+                diffBody = renderDiffTableFromScript([{type: 'block-del', text: contentA}]);
             } else if (contentA !== contentB) {
+                // 使用 Myers Diff 演算法進行比對
+                const linesA = contentA.split('\n');
+                const linesB = contentB.split('\n');
+                const diffScript = myersDiff(linesA, linesB);
+                
                 statusClass = "status-modified";
                 badge = `<span class="badge badge-mod">Modified</span>`;
                 navMark = `<span class="diff-mark mod">[M]</span>`;
-                diffBody = computeSideBySideDiff(contentA, contentB);
+                diffBody = renderDiffTableFromScript(diffScript);
             } else {
                 statusClass = "status-same";
-                diffBody = renderSideBySideTable(contentA, contentB, "same");
+                diffBody = renderDiffTableFromScript([{type: 'block-same', text: contentA}]);
             }
 
             navHtml += `<a href="#${safeId}" class="nav-link">${navMark} ${escapeHtml(title)}</a>`;
-            
             contentHtml += `
                 <div id="${safeId}" class="section-card ${statusClass}">
                     <div class="section-header">
@@ -291,87 +350,52 @@ document.addEventListener('DOMContentLoaded', () => {
         return renderHtmlTemplate(`Compare: ${nameA} vs ${nameB}`, navHtml, contentHtml, true);
     }
 
-    // --- 核心演算法：左右並排且具備 Lookahead 對齊功能 ---
-    function computeSideBySideDiff(textA, textB) {
-        const linesA = textA.split('\n');
-        const linesB = textB.split('\n');
+    function renderDiffTableFromScript(script) {
+        let html = '<div class="diff-table">';
         
-        let htmlRows = "";
-        let i = 0, j = 0;
-        const LOOKAHEAD = 3; 
-
-        while (i < linesA.length || j < linesB.length) {
-            let valA = linesA[i];
-            let valB = linesB[j];
-
-            if (valA === valB) {
-                htmlRows += createDiffRow(i+1, valA, j+1, valB, 'neutral');
-                i++; j++;
-            } else {
-                let foundInB = -1; 
-                let foundInA = -1; 
-
-                if (i < linesA.length) {
-                    for (let k = 1; k <= LOOKAHEAD; k++) {
-                        if (j + k < linesB.length && linesB[j + k] === valA) {
-                            foundInB = k;
-                            break;
-                        }
-                    }
-                }
-
-                if (j < linesB.length) {
-                    for (let k = 1; k <= LOOKAHEAD; k++) {
-                        if (i + k < linesA.length && linesA[i + k] === valB) {
-                            foundInA = k;
-                            break;
-                        }
-                    }
-                }
-
-                if (foundInB !== -1) {
-                    htmlRows += createDiffRow(null, "", j+1, valB, 'add');
-                    j++;
-                } else if (foundInA !== -1) {
-                    htmlRows += createDiffRow(i+1, valA, null, "", 'del');
-                    i++;
-                } else {
-                    htmlRows += createDiffRow(i+1, valA, j+1, valB, 'mod');
-                    i++; j++;
-                }
+        // 為了視覺優化，我們將連續的 del 和 ins 合併檢查，標示為 modified (黃色)
+        // 但如果只是單純的 diff 顯示，直接渲染即可。這裡為了精準度，我們做逐行渲染。
+        
+        for (let i = 0; i < script.length; i++) {
+            const item = script[i];
+            
+            if (item.type === 'eq') {
+                html += createDiffRow(item.lineA, item.line, item.lineB, item.line, 'neutral');
+            } 
+            else if (item.type === 'del') {
+                // 檢查下一行是否為 ins (替換)
+                let isMod = false;
+                let nextItem = script[i+1];
+                
+                // 可選：如果您希望看到紅綠並排（修改），可以開啟這段邏輯
+                // 這裡我們保持標準 diff：左紅右空
+                html += createDiffRow(item.lineA, item.line, null, "", 'del');
+            } 
+            else if (item.type === 'ins') {
+                html += createDiffRow(null, "", item.lineB, item.line, 'ins');
+            }
+            else if (item.type === 'block-same') {
+                const lines = item.text.split('\n');
+                lines.forEach((l, idx) => html += createDiffRow(idx+1, l, idx+1, l, 'neutral'));
+            }
+            else if (item.type === 'block-add') {
+                const lines = item.text.split('\n');
+                lines.forEach((l, idx) => html += createDiffRow(null, "", idx+1, l, 'ins'));
+            }
+            else if (item.type === 'block-del') {
+                const lines = item.text.split('\n');
+                lines.forEach((l, idx) => html += createDiffRow(idx+1, l, null, "", 'del'));
             }
         }
         
-        return `<div class="diff-table">${htmlRows}</div>`;
-    }
-
-    function renderSideBySideTable(fullTextA, fullTextB, type) {
-        const linesA = fullTextA ? fullTextA.split('\n') : [];
-        const linesB = fullTextB ? fullTextB.split('\n') : [];
-        const max = Math.max(linesA.length, linesB.length);
-        let html = "";
-        
-        for(let k=0; k<max; k++) {
-            let rowType = 'neutral';
-            if (type === 'add-block') rowType = 'add';
-            if (type === 'del-block') rowType = 'del';
-            
-            let numA = (type === 'add-block') ? null : (k < linesA.length ? k+1 : null);
-            let valA = (type === 'add-block') ? "" : (linesA[k] || "");
-            
-            let numB = (type === 'del-block') ? null : (k < linesB.length ? k+1 : null);
-            let valB = (type === 'del-block') ? "" : (linesB[k] || "");
-
-            html += createDiffRow(numA, valA, numB, valB, rowType);
-        }
-        return `<div class="diff-table">${html}</div>`;
+        html += '</div>';
+        return html;
     }
 
     function createDiffRow(numA, txtA, numB, txtB, type) {
         let clsA = "", clsB = "";
-        if (type === 'add') { clsA = "empty"; clsB = "bg-add"; }
+        if (type === 'ins') { clsA = "empty"; clsB = "bg-add"; }
         else if (type === 'del') { clsA = "bg-del"; clsB = "empty"; }
-        else if (type === 'mod') { clsA = "bg-mod-old"; clsB = "bg-mod-new"; }
         
         return `
             <div class="diff-row">
@@ -383,10 +407,25 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    function generateSingleReport(filename, sections) {
+        const navItems = sections.map(s => `<a href="#${s.id}" class="nav-link">${escapeHtml(s.title)}</a>`).join('');
+        const contentItems = sections.map(s => `
+            <div id="${s.id}" class="section-card">
+                <div class="section-header">
+                    <h2>${escapeHtml(s.title)}</h2>
+                    <button class="copy-btn" onclick="copyToClipboard('pre-${s.id}')">複製內容</button>
+                </div>
+                <div class="section-body">
+                    <pre id="pre-${s.id}">${escapeHtml(s.content)}</pre>
+                </div>
+            </div>
+        `).join('');
+        return renderHtmlTemplate(filename, navItems, contentItems, false);
+    }
+
     function renderHtmlTemplate(title, navHtml, contentHtml, isDiffMode) {
         const dateStr = new Date().toLocaleString();
         
-        // 注意：這裡的 CSS 是給「產出的報表」用的，必須保留在 JS 內，確保下載後的檔案是獨立完整的
         const diffCss = `
             .diff-table { display: flex; flex-direction: column; font-family: "Menlo", "Consolas", monospace; font-size: 0.85rem; width: 100%; }
             .diff-row { display: flex; border-bottom: 1px solid #f0f0f0; min-height: 1.5em; }
@@ -397,8 +436,6 @@ document.addEventListener('DOMContentLoaded', () => {
             .diff-cell.content:last-child { border-right: none; }
             .bg-add { background-color: #e6fffa; color: #22543d; }
             .bg-del { background-color: #fff5f5; color: #742a2a; }
-            .bg-mod-old { background-color: #fffaf0; color: #744210; text-decoration: line-through; opacity: 0.7; }
-            .bg-mod-new { background-color: #fffff0; color: #744210; font-weight: bold; }
             .empty { background-color: #f7fafc; background-image: linear-gradient(45deg, #edf2f7 25%, transparent 25%, transparent 75%, #edf2f7 75%, #edf2f7), linear-gradient(45deg, #edf2f7 25%, transparent 25%, transparent 75%, #edf2f7 75%, #edf2f7); background-size: 10px 10px; background-position: 0 0, 5px 5px; }
             .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; color: white; margin-left: 10px; vertical-align: middle; font-weight: normal; }
             .badge-add { background: #48bb78; }
