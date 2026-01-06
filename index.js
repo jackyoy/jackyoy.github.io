@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileNames = [null, document.getElementById('fileName1'), document.getElementById('fileName2')];
     const areas = [null, document.getElementById('area1'), document.getElementById('area2')];
     const actionBtn = document.getElementById('actionBtn');
+    const resetBtn = document.getElementById('resetBtn'); // 新增
     const statusDiv = document.getElementById('status');
     
     let files = [null, null, null]; 
@@ -12,32 +13,56 @@ document.addEventListener('DOMContentLoaded', () => {
     window.triggerFile = (idx) => fileInputs[idx].click();
     
     window.clearFile = (idx, event) => {
-        event.stopPropagation();
+        if(event) event.stopPropagation();
         fileInputs[idx].value = '';
         files[idx] = null;
-        updateUIState(idx);
+        updateUIState();
     };
 
     [1, 2].forEach(idx => {
         fileInputs[idx].addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 files[idx] = e.target.files[0];
-                updateUIState(idx);
+                updateUIState();
             }
         });
     });
 
-    function updateUIState(idx) {
-        if (files[idx]) {
-            fileNames[idx].textContent = files[idx].name;
-            fileNames[idx].style.color = "#2d3748";
-            areas[idx].classList.add('has-file');
-        } else {
-            fileNames[idx].textContent = "點擊選擇檔案";
-            fileNames[idx].style.color = "#718096";
-            areas[idx].classList.remove('has-file');
+    // 新增：重置功能
+    resetBtn.addEventListener('click', () => {
+        // 清除內部數據
+        files = [null, null, null];
+        if (downloadUrl) {
+            URL.revokeObjectURL(downloadUrl);
+            downloadUrl = null;
         }
+        
+        // 清除 DOM 狀態
+        fileInputs[1].value = '';
+        fileInputs[2].value = '';
+        
+        // 隱藏重置按鈕
+        resetBtn.style.display = 'none';
+        
+        // 更新 UI 回到初始狀態
+        updateUIState();
+        statusDiv.textContent = "";
+    });
 
+    function updateUIState() {
+        [1, 2].forEach(idx => {
+            if (files[idx]) {
+                fileNames[idx].textContent = files[idx].name;
+                fileNames[idx].style.color = "#2d3748";
+                areas[idx].classList.add('has-file');
+            } else {
+                fileNames[idx].textContent = "點擊選擇檔案";
+                fileNames[idx].style.color = "#718096";
+                areas[idx].classList.remove('has-file');
+            }
+        });
+
+        // 判斷按鈕文字
         if (files[1] && files[2]) {
             actionBtn.textContent = "開始精準比對 (Git-Diff Mode)";
             actionBtn.disabled = false;
@@ -49,12 +74,12 @@ document.addEventListener('DOMContentLoaded', () => {
             actionBtn.disabled = true;
         }
         
+        // 如果是剛從下載模式切換回來，要移除下載樣式
         actionBtn.classList.remove('download');
-        if (downloadUrl) {
-            URL.revokeObjectURL(downloadUrl);
-            downloadUrl = null;
+        // 若使用者在下載模式下刪除檔案，重置按鈕也應該消失，避免邏輯混亂
+        if (!downloadUrl) {
+           resetBtn.style.display = 'none';
         }
-        statusDiv.textContent = "";
     }
 
     // --- 主流程邏輯 ---
@@ -74,7 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
             a.download = baseName + '.html';
             a.click();
         } else {
-            // 使用 setTimeout 讓 UI 有機會更新 "處理中" 狀態
             statusDiv.textContent = "正在進行全域 Diff 運算...";
             actionBtn.disabled = true;
             actionBtn.textContent = "運算中...";
@@ -116,6 +140,9 @@ document.addEventListener('DOMContentLoaded', () => {
             actionBtn.textContent = "下載 HTML 報告";
             actionBtn.classList.add('download');
             actionBtn.disabled = false;
+            
+            // 任務完成，顯示重置按鈕
+            resetBtn.style.display = 'block';
 
         } catch (err) {
             console.error(err);
@@ -209,8 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return sections;
     }
 
-    // --- Diff 演算法核心 (Myers Algorithm Implementation) ---
-    // 這是解決錯位問題的關鍵。它能找到「最短編輯距離」，保證相同內容一定會對齊。
+    // --- Diff 演算法核心 (Myers Algorithm) ---
     function myersDiff(linesA, linesB) {
         const N = linesA.length;
         const M = linesB.length;
@@ -220,9 +246,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const trace = [];
 
         for (let d = 0; d <= max; d++) {
-            const vClone = new Int32Array(v); // 備份每一步的狀態，用於回溯路徑
+            const vClone = new Int32Array(v);
             trace.push(vClone);
-            
             for (let k = -d; k <= d; k += 2) {
                 let x, y;
                 if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) {
@@ -231,43 +256,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     x = v[max + k - 1] + 1;
                 }
                 y = x - k;
-
                 while (x < N && y < M && linesA[x] === linesB[y]) {
-                    x++;
-                    y++;
+                    x++; y++;
                 }
-
                 v[max + k] = x;
-
-                if (x >= N && y >= M) {
-                    return buildDiffScript(trace, linesA, linesB);
-                }
+                if (x >= N && y >= M) return buildDiffScript(trace, linesA, linesB);
             }
         }
-        return []; // Should not happen
+        return [];
     }
 
     function buildDiffScript(trace, linesA, linesB) {
         const N = linesA.length;
         const M = linesB.length;
         const max = N + M;
-        
         let x = N;
         let y = M;
         let changes = [];
 
-        // 回溯找出路徑
         for (let d = trace.length - 1; d >= 0; d--) {
             const v = trace[d];
             const k = x - y;
-            
             let prevK;
             if (k === -d || (k !== d && v[max + k - 1] < v[max + k + 1])) {
                 prevK = k + 1;
             } else {
                 prevK = k - 1;
             }
-            
             let prevX = v[max + prevK];
             let prevY = prevX - prevK;
 
@@ -289,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return changes;
     }
 
-    // --- 報告生成 (左右並排比對) ---
+    // --- 報告生成邏輯 ---
     function generateSideBySideDiffReport(nameA, nameB, secsA, secsB) {
         const mapA = new Map(secsA.map(s => [s.title, s.content]));
         const mapB = new Map(secsB.map(s => [s.title, s.content]));
@@ -320,7 +335,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 navMark = `<span class="diff-mark del">[-]</span>`;
                 diffBody = renderDiffTableFromScript([{type: 'block-del', text: contentA}]);
             } else if (contentA !== contentB) {
-                // 使用 Myers Diff 演算法進行比對
                 const linesA = contentA.split('\n');
                 const linesB = contentB.split('\n');
                 const diffScript = myersDiff(linesA, linesB);
@@ -352,42 +366,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDiffTableFromScript(script) {
         let html = '<div class="diff-table">';
-        
-        // 為了視覺優化，我們將連續的 del 和 ins 合併檢查，標示為 modified (黃色)
-        // 但如果只是單純的 diff 顯示，直接渲染即可。這裡為了精準度，我們做逐行渲染。
-        
         for (let i = 0; i < script.length; i++) {
             const item = script[i];
-            
             if (item.type === 'eq') {
                 html += createDiffRow(item.lineA, item.line, item.lineB, item.line, 'neutral');
-            } 
-            else if (item.type === 'del') {
-                // 檢查下一行是否為 ins (替換)
-                let isMod = false;
-                let nextItem = script[i+1];
-                
-                // 可選：如果您希望看到紅綠並排（修改），可以開啟這段邏輯
-                // 這裡我們保持標準 diff：左紅右空
+            } else if (item.type === 'del') {
                 html += createDiffRow(item.lineA, item.line, null, "", 'del');
-            } 
-            else if (item.type === 'ins') {
+            } else if (item.type === 'ins') {
                 html += createDiffRow(null, "", item.lineB, item.line, 'ins');
-            }
-            else if (item.type === 'block-same') {
+            } else if (item.type === 'block-same') {
                 const lines = item.text.split('\n');
                 lines.forEach((l, idx) => html += createDiffRow(idx+1, l, idx+1, l, 'neutral'));
-            }
-            else if (item.type === 'block-add') {
+            } else if (item.type === 'block-add') {
                 const lines = item.text.split('\n');
                 lines.forEach((l, idx) => html += createDiffRow(null, "", idx+1, l, 'ins'));
-            }
-            else if (item.type === 'block-del') {
+            } else if (item.type === 'block-del') {
                 const lines = item.text.split('\n');
                 lines.forEach((l, idx) => html += createDiffRow(idx+1, l, null, "", 'del'));
             }
         }
-        
         html += '</div>';
         return html;
     }
@@ -425,7 +422,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderHtmlTemplate(title, navHtml, contentHtml, isDiffMode) {
         const dateStr = new Date().toLocaleString();
-        
         const diffCss = `
             .diff-table { display: flex; flex-direction: column; font-family: "Menlo", "Consolas", monospace; font-size: 0.85rem; width: 100%; }
             .diff-row { display: flex; border-bottom: 1px solid #f0f0f0; min-height: 1.5em; }
