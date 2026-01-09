@@ -68,7 +68,8 @@ p {
     position: relative;
 }
 
-.upload-area:hover {
+/* 修改處：增加 .drag-over 支援 */
+.upload-area:hover, .upload-area.drag-over {
     border-color: #4299e1;
     background-color: #ebf8ff;
 }
