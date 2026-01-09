@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多重系統日誌分析器 (Test Mode)</title>
+    <link rel="stylesheet" href="muti.css">
+</head>
+<body>
+
+    <div class="card">
+        <h1>系統日誌多檔整合工具</h1>
+        <p>測試模式：一次上傳多個日誌檔，生成一份可動態切換比對的互動式報告。</p>
+
+        <div class="upload-container">
+            <div class="upload-wrapper">
+                <span class="upload-label">批次檔案上傳區 (支援拖曳 / 多選)</span>
+                <div class="upload-area" id="dropZone">
+                    <div class="upload-icon">📚</div>
+                    <div class="file-name" id="dropZoneText">點擊選擇或拖曳多個檔案至此</div>
+                    <input type="file" id="fileInput" multiple accept=".txt,.html,.htm" style="display: none;">
+                </div>
+            </div>
+        </div>
+
+        <div id="fileList" class="file-list"></div>
+
+        <button id="actionBtn" disabled>請至少上傳兩個檔案</button>
+        <button id="resetBtn" class="reset-btn" style="display: none;">↻ 清除重置</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script src="muti.js"></script>
+</body>
+</html>

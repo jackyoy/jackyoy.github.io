@@ -1,0 +1,100 @@
+/* --- 基礎版面 --- */
+body {
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #f0f2f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.card {
+    background: white;
+    padding: 2.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    text-align: center;
+    max-width: 600px;
+    width: 100%;
+}
+
+h1 { color: #2d3748; margin-bottom: 0.5rem; font-size: 1.5rem; }
+p { color: #718096; margin-bottom: 2rem; font-size: 0.95rem; }
+
+.upload-container { margin-bottom: 1rem; }
+.upload-label { display: block; margin-bottom: 8px; font-size: 0.9rem; font-weight: 600; color: #4a5568; text-align: left; }
+
+.upload-area {
+    border: 2px dashed #cbd5e0;
+    border-radius: 8px;
+    padding: 2rem;
+    cursor: pointer;
+    transition: 0.2s;
+    background: #fff;
+}
+
+.upload-area:hover, .upload-area.drag-over {
+    border-color: #4299e1;
+    background-color: #ebf8ff;
+}
+
+.upload-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.file-name { color: #718096; font-size: 0.9rem; }
+
+/* 檔案列表樣式 */
+.file-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 1.5rem;
+    justify-content: center;
+}
+
+.file-tag {
+    background: #edf2f7;
+    color: #2d3748;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    border: 1px solid #e2e8f0;
+}
+
+.file-tag .count {
+    background: #cbd5e0;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0 4px;
+    border-radius: 3px;
+    margin-right: 6px;
+}
+
+/* 按鈕 */
+button {
+    background-color: #4299e1;
+    color: white;
+    border: none;
+    padding: 1rem;
+    border-radius: 6px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: 0.2s;
+    width: 100%;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+button:disabled { background-color: #a0aec0; cursor: not-allowed; }
+button:hover:not(:disabled) { background-color: #3182ce; }
+button.download { background-color: #48bb78; }
+button.download:hover { background-color: #38a169; }
+
+.reset-btn { background-color: #e2e8f0; color: #4a5568; margin-top: 10px; }
+.reset-btn:hover { background-color: #cbd5e0; }
+
+#status { margin-top: 1rem; font-size: 0.9rem; color: #4a5568; min-height: 1.5em; }
