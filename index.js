@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileNames = [null, document.getElementById('fileName1'), document.getElementById('fileName2')];
     const areas = [null, document.getElementById('area1'), document.getElementById('area2')];
     const actionBtn = document.getElementById('actionBtn');
-    const resetBtn = document.getElementById('resetBtn'); // 新增
+    const resetBtn = document.getElementById('resetBtn');
     const statusDiv = document.getElementById('status');
     
     let files = [null, null, null]; 
@@ -19,10 +19,47 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUIState();
     };
 
+    // 處理點擊上傳
     [1, 2].forEach(idx => {
         fileInputs[idx].addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 files[idx] = e.target.files[0];
+                updateUIState();
+            }
+        });
+
+        // 處理拖曳上傳 (Drag and Drop)
+        const area = areas[idx];
+        
+        // 防止瀏覽器預設開啟檔案行為
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            area.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // 拖曳進入時增加視覺提示
+        ['dragenter', 'dragover'].forEach(eventName => {
+            area.addEventListener(eventName, () => area.classList.add('drag-over'), false);
+        });
+
+        // 拖曳離開或放下後移除視覺提示
+        ['dragleave', 'drop'].forEach(eventName => {
+            area.addEventListener(eventName, () => area.classList.remove('drag-over'), false);
+        });
+
+        // 處理檔案放下
+        area.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const droppedFiles = dt.files;
+
+            if (droppedFiles.length > 0) {
+                files[idx] = droppedFiles[0];
+                // 同步更新 input 的 files (雖然邏輯主要依賴 files 陣列，但保持 DOM 一致性較佳)
+                fileInputs[idx].files = droppedFiles;
                 updateUIState();
             }
         });
@@ -56,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 fileNames[idx].style.color = "#2d3748";
                 areas[idx].classList.add('has-file');
             } else {
-                fileNames[idx].textContent = "點擊選擇檔案";
+                fileNames[idx].textContent = "點擊或拖放檔案";
                 fileNames[idx].style.color = "#718096";
                 areas[idx].classList.remove('has-file');
             }
