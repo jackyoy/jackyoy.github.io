@@ -4,13 +4,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const dashboard = document.getElementById('dashboard');
     const searchInput = document.getElementById('searchInput');
     const showDiffOnly = document.getElementById('showDiffOnly');
-    const downloadBtn = document.getElementById('downloadBtn'); // 新增
+    const downloadBtn = document.getElementById('downloadBtn');
     
     // 全域變數儲存資料
     let reportData = [];
-    let metaInfo = {}; // 新增：儲存 meta 以便打包時使用
+    let metaInfo = {}; 
 
-    // --- 檔案上傳處理 ---
+    // --- 1. 介面與事件綁定 ---
     if(dropZone) {
         dropZone.addEventListener('click', () => fileInput.click());
 
@@ -38,13 +38,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 檢查是否為「離線報告模式」 ---
-    // 如果全域變數 window.OFFLINE_DATA 存在，代表這是下載後的檔案，直接載入資料
+    // --- 2. 檢查是否為「離線報告模式」 ---
     if (window.OFFLINE_DATA) {
-        if(dropZone) dropZone.style.display = 'none'; // 隱藏上傳區
+        if(dropZone) dropZone.style.display = 'none';
         dashboard.classList.remove('hidden');
-        document.getElementById('downloadBtn').style.display = 'none'; // 離線版不需要再下載自己
-        parseReport(window.OFFLINE_DATA, true); // true 表示不重新計算，直接用
+        if(downloadBtn) downloadBtn.style.display = 'none';
+        parseReport(window.OFFLINE_DATA);
     }
 
     function processFile(file) {
@@ -62,9 +61,8 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
     }
 
-    // --- 資料解析邏輯 ---
-    function parseReport(json, isOffline = false) {
-        // 1. 處理 Meta
+    // --- 3. 資料解析邏輯 ---
+    function parseReport(json) {
         metaInfo = json.meta || {};
         document.getElementById('metaHostname').textContent = metaInfo.hostname || 'Unknown';
         
@@ -73,8 +71,6 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'Unknown';
         document.getElementById('metaTime').textContent = scanTime;
 
-        // 2. 轉換 Results (若是離線版，資料結構可能已經處理過，視實作而定)
-        // 這裡我們統一假設傳入的 json 結構都一樣 (即原始結構)
         reportData = [];
         if (json.results) {
             Object.keys(json.results).forEach(key => {
@@ -93,17 +89,15 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // 3. 計算統計
         const total = reportData.length;
         const fixedCount = reportData.filter(d => d.status === 'FIXED').length;
         document.getElementById('metaTotal').textContent = total;
         document.getElementById('metaFixed').textContent = fixedCount;
 
-        // 4. 渲染
         renderTable(reportData);
     }
 
-    // --- 渲染表格 ---
+    // --- 4. 渲染表格 ---
     function renderTable(data) {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = '';
@@ -133,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tr.innerHTML = `
                 <td class="id-col">${item.id}</td>
-                <td>${escapeHtml(item.description)}<br><small style="color:#94a3b8">Expected: ${escapeHtml(item.expected)}</small></td>
+                <td>${escapeHtml(item.description)}<br><small style="color:#94a3b8">Exp: ${escapeHtml(item.expected)}</small></td>
                 <td class="${beforeClass}">${beforeHtml}</td>
                 <td class="${afterClass}">${afterHtml}</td>
                 <td><span class="badge ${badgeClass}">${item.status}</span></td>
@@ -142,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 搜尋與過濾 ---
+    // --- 5. 搜尋與過濾 ---
     function filterData() {
         const term = searchInput.value.toLowerCase();
         const onlyDiff = showDiffOnly.checked;
@@ -159,35 +153,56 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput.addEventListener('input', filterData);
     showDiffOnly.addEventListener('change', filterData);
 
-    // --- 下載離線報告功能 ---
+    // --- 6. 下載離線報告功能 (核心修正) ---
     if(downloadBtn) {
         downloadBtn.addEventListener('click', generateOfflineReport);
     }
 
     function generateOfflineReport() {
-        // 1. 取得目前的 CSS
-        // 在正式環境建議 fetch gcb.css，這邊為了簡化，假設樣式單純
-        // 我們嘗試讀取 document.styleSheets (跨域可能會擋)，最穩是用 fetch
-        fetch('gcb.css')
-            .then(res => res.text())
-            .then(cssContent => {
-                createHtmlBlob(cssContent);
-            })
-            .catch(err => {
-                console.warn("無法讀取外部 CSS，將使用基本樣式", err);
-                createHtmlBlob(""); 
-            });
+        // [修正] 不使用 fetch('gcb.css')，改為直接定義 CSS 字串
+        // 這樣可以避免 local file CORS 錯誤
+        const cssContent = `
+            :root { --primary: #2563eb; --bg: #f8fafc; --card-bg: #ffffff; --text-main: #1e293b; --text-sub: #64748b; --border: #e2e8f0; --status-ok-bg: #dcfce7; --status-ok-text: #166534; --status-fixed-bg: #dbeafe; --status-fixed-text: #1e40af; --status-failed-bg: #fee2e2; --status-failed-text: #991b1b; }
+            body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); color: var(--text-main); margin: 0; padding: 20px; line-height: 1.5; }
+            .container { max-width: 1200px; margin: 0 auto; }
+            header { text-align: center; margin-bottom: 30px; }
+            .hidden { display: none; }
+            .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+            .card { background: var(--card-bg); padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid var(--border); }
+            .meta-card .label { font-size: 0.85rem; color: var(--text-sub); margin-bottom: 5px; font-weight: 600; }
+            .meta-card .value { font-size: 1.25rem; font-weight: bold; color: var(--text-main); word-break: break-all; }
+            .highlight-fixed { color: var(--primary); }
+            .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+            .search-box { padding: 10px; border: 1px solid var(--border); border-radius: 6px; width: 300px; }
+            .table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow-x: auto; border: 1px solid var(--border); }
+            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+            th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+            th { background-color: #f1f5f9; font-weight: 600; color: var(--text-sub); position: sticky; top: 0; }
+            .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; display: inline-block; min-width: 60px; text-align: center; }
+            .badge-ok { background: var(--status-ok-bg); color: var(--status-ok-text); }
+            .badge-fixed { background: var(--status-fixed-bg); color: var(--status-fixed-text); }
+            .badge-failed { background: var(--status-failed-bg); color: var(--status-failed-text); }
+            .diff-cell { font-family: "Menlo", monospace; font-size: 0.85rem; }
+            .val-old { color: #94a3b8; text-decoration: line-through; display: block; font-size: 0.8em; margin-bottom: 4px; }
+            .val-new { color: var(--text-main); font-weight: 600; }
+            .diff-highlight .val-old { color: #ef4444; background: #fff5f5; padding: 2px 4px; border-radius: 2px; text-decoration: none; opacity: 0.8; }
+            .diff-highlight .val-old::before { content: "- "; }
+            .diff-highlight .val-new { color: #166534; background: #f0fdf4; padding: 2px 4px; border-radius: 2px; }
+            .diff-highlight .val-new::before { content: "+ "; }
+            .id-col { font-family: monospace; font-weight: 600; color: var(--text-sub); }
+            .upload-area { display: none !important; } /* 離線版強制隱藏上傳區 */
+            #downloadBtn { display: none !important; } /* 離線版強制隱藏下載鈕 */
+        `;
+
+        createHtmlBlob(cssContent);
     }
 
     function createHtmlBlob(cssContent) {
-        // 2. 準備資料
-        // 我們需要重建原始 JSON 結構，以便重用 parseReport 邏輯
-        // 或者更簡單：直接存 window.OFFLINE_DATA
+        // 準備要儲存的資料
         const dataToSave = {
             meta: metaInfo,
             results: {}
         };
-        // 還原 results 物件結構
         reportData.forEach(item => {
             dataToSave.results[item.id + ".yml"] = {
                 description: item.description,
@@ -198,27 +213,14 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         });
 
-        // 3. 取得目前的 JS 程式碼 (把自己包進去)
-        const jsContent = document.querySelector('script[src="gcb.js"]') ? 
-            // 這裡無法直接讀取 src 內容，除非 fetch。
-            // 為了確保離線可用，我們將目前的邏輯封裝成字串。
-            // 但最簡單的方法是：把目前的資料注入到 HTML 模板中，並附上精簡版的渲染腳本。
-            // 下面這個 scriptContent 是為了離線版專用的精簡腳本。
-            getOfflineScript() : "";
+        const jsContent = getOfflineScript();
 
-        // 4. 組合 HTML
         const htmlContent = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <title>GCB Report - ${metaInfo.hostname || 'Offline'}</title>
-    <style>
-        ${cssContent}
-        /* 確保隱藏上傳區與下載鈕 */
-        .upload-area { display: none !important; }
-        #downloadBtn { display: none !important; }
-        #dashboard { display: block !important; }
-    </style>
+    <style>${cssContent}</style>
 </head>
 <body>
     <div class="container">
@@ -254,16 +256,12 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
 
     <script>
-        // 注入資料
         window.OFFLINE_DATA = ${JSON.stringify(dataToSave)};
-        
-        // 注入邏輯
         ${jsContent}
     <\/script>
 </body>
 </html>`;
 
-        // 5. 下載
         const blob = new Blob([htmlContent], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -274,8 +272,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getOfflineScript() {
-        // 回傳必要的 JS 邏輯字串 (複製上述核心功能)
-        // 為了避免重複維護，這裡將包含一個自執行函數，內容為縮減版邏輯
         return `
         document.addEventListener('DOMContentLoaded', () => {
             const searchInput = document.getElementById('searchInput');
@@ -342,8 +338,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderTable(res);
             }
 
-            searchInput.addEventListener('input', filter);
-            showDiffOnly.addEventListener('change', filter);
+            if(searchInput) searchInput.addEventListener('input', filter);
+            if(showDiffOnly) showDiffOnly.addEventListener('change', filter);
 
             function esc(t) {
                 if(t==null) return "";
