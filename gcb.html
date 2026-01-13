@@ -4,7 +4,182 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GCB 合規性差異分析報告</title>
-    <link rel="stylesheet" href="gcb.css">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --border: #e2e8f0;
+            --status-ok-bg: #dcfce7; --status-ok-text: #166534;
+            --status-fixed-bg: #dbeafe; --status-fixed-text: #1e40af;
+            --status-failed-bg: #fee2e2; --status-failed-text: #991b1b;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        header { text-align: center; margin-bottom: 30px; }
+        header h1 { margin-bottom: 10px; color: var(--text-main); }
+        header p { color: var(--text-sub); }
+
+        /* 上傳區 */
+        .upload-area {
+            background: var(--card-bg);
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover, .upload-area.drag-over { border-color: var(--primary); background-color: #eff6ff; }
+        .upload-area .icon { font-size: 48px; margin-bottom: 15px; }
+        .upload-area .text { color: var(--text-sub); }
+
+        /* 隱藏元素 */
+        .hidden { display: none !important; }
+
+        /* 儀表板 */
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid var(--border);
+        }
+        .meta-card .label { font-size: 0.85rem; color: var(--text-sub); font-weight: 600; margin-bottom: 5px; }
+        .meta-card .value { font-size: 1.2rem; font-weight: bold; color: var(--text-main); }
+        .highlight-fixed { color: var(--primary); }
+
+        /* 控制列 */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .search-box {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            width: 300px;
+            font-size: 14px;
+        }
+        .filter-group label { cursor: pointer; font-weight: 600; user-select: none; }
+
+        /* 表格樣式 */
+        .table-container {
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow-x: auto;
+            border: 1px solid var(--border);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
+        
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+            word-wrap: break-word; /* 防止內容撐爆 */
+        }
+        
+        th {
+            background-color: #f1f5f9;
+            font-weight: 600;
+            color: var(--text-sub);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        tr:hover { background-color: #f8fafc; }
+
+        /* 欄位寬度定義 */
+        .col-id { width: 10%; }
+        .col-desc { width: 30%; }
+        .col-val { width: 25%; }
+        .col-status { width: 10%; text-align: center; }
+
+        /* 內容樣式 */
+        .id-text { font-family: monospace; font-weight: bold; color: var(--text-sub); }
+        
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            display: inline-block;
+            min-width: 60px;
+            text-align: center;
+        }
+        .badge-ok { background: var(--status-ok-bg); color: var(--status-ok-text); }
+        .badge-fixed { background: var(--status-fixed-bg); color: var(--status-fixed-text); }
+        .badge-failed { background: var(--status-failed-bg); color: var(--status-failed-text); }
+
+        /* 差異比對樣式 */
+        .diff-cell { font-family: "Menlo", "Consolas", monospace; font-size: 0.85rem; line-height: 1.6; }
+        .val-old { 
+            color: #94a3b8; 
+            text-decoration: line-through; 
+            display: block; 
+            font-size: 0.85em;
+            margin-bottom: 4px;
+        }
+        .val-new { color: var(--text-main); font-weight: 600; display: block; }
+        
+        .diff-highlight .val-old {
+            color: #ef4444; 
+            background: #fff5f5; 
+            padding: 2px 6px; 
+            border-radius: 4px; 
+            text-decoration: none;
+            opacity: 0.8;
+            width: fit-content;
+        }
+        .diff-highlight .val-old::before { content: "- "; }
+        
+        .diff-highlight .val-new {
+            color: #166534; 
+            background: #f0fdf4; 
+            padding: 2px 6px; 
+            border-radius: 4px;
+            width: fit-content;
+        }
+        .diff-highlight .val-new::before { content: "+ "; }
+
+        /* 下載按鈕 */
+        .btn-download {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-download:hover { background-color: #1d4ed8; }
+    </style>
 </head>
 <body>
 
@@ -16,32 +191,20 @@
 
         <div class="upload-area" id="dropZone">
             <div class="icon">📂</div>
-            <div class="text">點擊或拖曳 JSON 檔案至此 (例如: compliance_report_RHEL810.json)</div>
+            <div class="text">點擊或拖曳 JSON 檔案至此</div>
             <input type="file" id="fileInput" accept=".json" style="display: none;">
         </div>
 
         <div id="dashboard" class="hidden">
-            <div style="text-align: right; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
                 <button id="downloadBtn" class="btn-download">⬇️ 下載離線 HTML 報告</button>
             </div>
 
             <div class="meta-grid">
-                <div class="card meta-card">
-                    <div class="label">主機名稱 (Hostname)</div>
-                    <div class="value" id="metaHostname">-</div>
-                </div>
-                <div class="card meta-card">
-                    <div class="label">掃描時間 (Scan Time)</div>
-                    <div class="value" id="metaTime">-</div>
-                </div>
-                <div class="card meta-card">
-                    <div class="label">總項目 (Total Checks)</div>
-                    <div class="value" id="metaTotal">-</div>
-                </div>
-                <div class="card meta-card">
-                    <div class="label">已修復 (Fixed)</div>
-                    <div class="value highlight-fixed" id="metaFixed">-</div>
-                </div>
+                <div class="card meta-card"><div class="label">主機名稱</div><div class="value" id="metaHostname">-</div></div>
+                <div class="card meta-card"><div class="label">掃描時間</div><div class="value" id="metaTime">-</div></div>
+                <div class="card meta-card"><div class="label">總項目</div><div class="value" id="metaTotal">-</div></div>
+                <div class="card meta-card"><div class="label">已修復 (Fixed)</div><div class="value highlight-fixed" id="metaFixed">-</div></div>
             </div>
 
             <div class="controls">
@@ -55,15 +218,14 @@
                 <table id="reportTable">
                     <thead>
                         <tr>
-                            <th width="10%">ID</th>
-                            <th width="35%">描述 (Description)</th>
-                            <th width="20%">強化前 (Before)</th>
-                            <th width="20%">強化後 (After)</th>
-                            <th width="10%">狀態</th>
+                            <th class="col-id">ID</th>
+                            <th class="col-desc">描述 (Description)</th>
+                            <th class="col-val">強化前 (Before)</th>
+                            <th class="col-val">強化後 (After)</th>
+                            <th class="col-status">狀態</th>
                         </tr>
                     </thead>
-                    <tbody id="tableBody">
-                        </tbody>
+                    <tbody id="tableBody"></tbody>
                 </table>
             </div>
         </div>
