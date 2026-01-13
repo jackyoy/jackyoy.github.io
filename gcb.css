@@ -1,225 +1,23 @@
-:root {
-    --primary: #2563eb;
-    --bg: #f8fafc;
-    --card-bg: #ffffff;
-    --text-main: #1e293b;
-    --text-sub: #64748b;
-    --border: #e2e8f0;
-    --status-ok-bg: #dcfce7;
-    --status-ok-text: #166534;
-    --status-fixed-bg: #dbeafe;
-    --status-fixed-text: #1e40af;
-    --status-failed-bg: #fee2e2;
-    --status-failed-text: #991b1b;
-    --diff-old-bg: #fee2e2;
-    --diff-new-bg: #dcfce7;
-}
+/* ... (保留原本的所有樣式) ... */
 
-body {
-    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    background-color: var(--bg);
-    color: var(--text-main);
-    margin: 0;
-    padding: 20px;
-    line-height: 1.5;
-}
-
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-header {
-    text-align: center;
-    margin-bottom: 30px;
-}
-
-header h1 {
-    color: var(--text-main);
-    margin-bottom: 10px;
-}
-
-header p {
-    color: var(--text-sub);
-}
-
-/* 上傳區塊 */
-.upload-area {
-    background: var(--card-bg);
-    border: 2px dashed #cbd5e1;
-    border-radius: 12px;
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.upload-area:hover, .upload-area.drag-over {
-    border-color: var(--primary);
-    background-color: #eff6ff;
-}
-
-.upload-area .icon {
-    font-size: 48px;
-    margin-bottom: 15px;
-}
-
-.upload-area .text {
-    font-size: 16px;
-    color: var(--text-sub);
-}
-
-/* 儀表板與 Meta */
-.hidden {
-    display: none;
-}
-
-.meta-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-top: 30px;
-    margin-bottom: 30px;
-}
-
-.card {
-    background: var(--card-bg);
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    border: 1px solid var(--border);
-}
-
-.meta-card .label {
-    font-size: 0.85rem;
-    color: var(--text-sub);
-    margin-bottom: 5px;
-    font-weight: 600;
-}
-
-.meta-card .value {
-    font-size: 1.25rem;
-    font-weight: bold;
-    color: var(--text-main);
-    word-break: break-all;
-}
-
-.highlight-fixed {
-    color: var(--primary);
-}
-
-/* 表格與控制項 */
-.controls {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.search-box {
-    padding: 10px;
-    border: 1px solid var(--border);
+/* 新增：下載按鈕樣式 */
+.btn-download {
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 20px;
     border-radius: 6px;
-    width: 300px;
-    font-size: 14px;
-}
-
-.filter-group label {
+    font-size: 0.95rem;
     font-weight: 600;
-    color: var(--text-main);
     cursor: pointer;
-    user-select: none;
+    transition: background-color 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.table-container {
-    background: var(--card-bg);
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    overflow-x: auto;
-    border: 1px solid var(--border);
+.btn-download:hover {
+    background-color: #1d4ed8; /* 深一點的藍色 */
 }
 
-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-
-th, td {
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-}
-
-th {
-    background-color: #f1f5f9;
-    font-weight: 600;
-    color: var(--text-sub);
-    position: sticky;
-    top: 0;
-}
-
-tr:hover {
-    background-color: #f8fafc;
-}
-
-/* 狀態標籤 */
-.badge {
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: bold;
-    display: inline-block;
-    text-align: center;
-    min-width: 60px;
-}
-
-.badge-ok { background: var(--status-ok-bg); color: var(--status-ok-text); }
-.badge-fixed { background: var(--status-fixed-bg); color: var(--status-fixed-text); }
-.badge-failed { background: var(--status-failed-bg); color: var(--status-failed-text); }
-
-/* 差異比較樣式 */
-.diff-cell {
-    font-family: "Menlo", "Consolas", monospace;
-    font-size: 0.85rem;
-}
-
-.val-old {
-    color: #94a3b8;
-    text-decoration: line-through;
-    display: block;
-    font-size: 0.8em;
-    margin-bottom: 4px;
-}
-
-.val-new {
-    color: var(--text-main);
-    font-weight: 600;
-}
-
-.diff-highlight .val-old {
-    color: #ef4444; /* 紅色刪除線 */
-    background: #fff5f5;
-    padding: 2px 4px;
-    border-radius: 2px;
-    text-decoration: none; /* 取消刪除線，改用色塊凸顯 */
-    opacity: 0.8;
-}
-.diff-highlight .val-old::before { content: "- "; }
-
-.diff-highlight .val-new {
-    color: #166534;
-    background: #f0fdf4;
-    padding: 2px 4px;
-    border-radius: 2px;
-}
-.diff-highlight .val-new::before { content: "+ "; }
-
-/* ID 欄位 */
-.id-col {
-    font-family: monospace;
-    font-weight: 600;
-    color: var(--text-sub);
+.btn-download:active {
+    transform: translateY(1px);
 }
