@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCB 合規性差異分析報告</title>
+    <link rel="stylesheet" href="gcb.css">
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>GCB 系統強化差異分析</h1>
+            <p>上傳 JSON 報告以檢視強化前後 (Before vs After) 的差異與合規狀態。</p>
+        </header>
+
+        <div class="upload-area" id="dropZone">
+            <div class="icon">📂</div>
+            <div class="text">點擊或拖曳 JSON 檔案至此 (例如: compliance_report_RHEL810.json)</div>
+            <input type="file" id="fileInput" accept=".json" style="display: none;">
+        </div>
+
+        <div id="dashboard" class="hidden">
+            <div class="meta-grid">
+                <div class="card meta-card">
+                    <div class="label">主機名稱 (Hostname)</div>
+                    <div class="value" id="metaHostname">-</div>
+                </div>
+                <div class="card meta-card">
+                    <div class="label">掃描時間 (Scan Time)</div>
+                    <div class="value" id="metaTime">-</div>
+                </div>
+                <div class="card meta-card">
+                    <div class="label">總項目 (Total Checks)</div>
+                    <div class="value" id="metaTotal">-</div>
+                </div>
+                <div class="card meta-card">
+                    <div class="label">已修復 (Fixed)</div>
+                    <div class="value highlight-fixed" id="metaFixed">-</div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <input type="text" id="searchInput" placeholder="搜尋 ID 或描述..." class="search-box">
+                <div class="filter-group">
+                    <label><input type="checkbox" id="showDiffOnly"> 僅顯示有差異項目 (Fixed/Changed)</label>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table id="reportTable">
+                    <thead>
+                        <tr>
+                            <th width="10%">ID</th>
+                            <th width="35%">描述 (Description)</th>
+                            <th width="20%">強化前 (Before)</th>
+                            <th width="20%">強化後 (After)</th>
+                            <th width="10%">狀態</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="gcb.js"></script>
+</body>
+</html>
