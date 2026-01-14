@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shell Script Reader & Diff Tool</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+        h2 { margin-top: 0; }
+        
+        /* 檔案上傳區樣式 */
+        .upload-area {
+            background-color: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px dashed #444;
+            text-align: center;
+        }
+        input[type="file"] {
+            color: #aaa;
+        }
+
+        /* 程式碼區塊樣式 */
+        #output-area {
+            margin-top: 20px;
+        }
+        pre {
+            border-radius: 6px;
+            margin: 0;
+        }
+        code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* Diff2Html 覆寫樣式以適配深色模式 */
+        .d2h-file-header { display: none; } /* 隱藏預設檔頭，使用自定義標題 */
+        .d2h-wrapper { background-color: #fff; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>Shell Script Reader / Diff Tool</h2>
+        <div class="upload-area">
+            <p>請選擇 1 個 .sh 檔案進行閱讀，或選擇 2 個 .sh 檔案進行差異比對。</p>
+            <input type="file" id="fileInput" accept=".sh,.txt" multiple>
+        </div>
+    </div>
+
+    <div id="output-area"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+
+<script src="readsh.js"></script>
+
+</body>
+</html>
