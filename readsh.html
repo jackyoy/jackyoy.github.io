@@ -3,74 +3,196 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shell Script Reader & Diff Tool</title>
+    <title>Shell Script Smart Reader</title>
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-    
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
 
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1e1e1e;
-            color: #d4d4d4;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        .header {
-            margin-bottom: 20px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #333;
-        }
-        h2 { margin-top: 0; }
-        
-        /* 檔案上傳區樣式 */
-        .upload-area {
-            background-color: #2d2d2d;
-            padding: 20px;
-            border-radius: 8px;
-            border: 2px dashed #444;
-            text-align: center;
-        }
-        input[type="file"] {
-            color: #aaa;
+        :root {
+            --bg-color: #1e1e1e;
+            --sidebar-bg: #252526;
+            --text-color: #d4d4d4;
+            --accent-color: #3794ff;
+            --border-color: #3e3e42;
+            --header-highlight: #c586c0; /* 紫色標題 */
         }
 
-        /* 程式碼區塊樣式 */
-        #output-area {
-            margin-top: 20px;
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
-        pre {
+
+        /* 頂部上傳區 */
+        .top-bar {
+            background-color: var(--sidebar-bg);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+
+        .drop-zone {
+            border: 2px dashed #555;
             border-radius: 6px;
+            padding: 20px 40px;
+            transition: all 0.3s ease;
+            text-align: center;
+            cursor: pointer;
+            position: relative;
+            flex-grow: 1;
+            margin-left: 20px;
+        }
+        
+        .drop-zone.dragover {
+            border-color: var(--accent-color);
+            background-color: rgba(55, 148, 255, 0.1);
+        }
+
+        .drop-zone p { margin: 0; pointer-events: none; color: #aaa; }
+        
+        input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* 主佈局：側邊欄 + 內容 */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden; /* 防止外層捲動 */
+        }
+
+        /* 側邊欄導航 */
+        .sidebar {
+            width: 280px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            padding: 10px 0;
+            flex-shrink: 0;
+        }
+
+        .sidebar h3 {
+            padding: 0 15px;
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .nav-list {
+            list-style: none;
+            padding: 0;
             margin: 0;
         }
+
+        .nav-item {
+            padding: 8px 15px;
+            cursor: pointer;
+            font-size: 13px;
+            border-left: 3px solid transparent;
+            color: #ccc;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.2s;
+        }
+
+        .nav-item:hover {
+            background-color: #333;
+            color: #fff;
+        }
+
+        .nav-item.active {
+            border-left-color: var(--accent-color);
+            background-color: #37373d;
+            color: #fff;
+        }
+
+        /* 內容顯示區 */
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            position: relative;
+            scroll-behavior: smooth;
+        }
+
+        /* 程式碼區塊優化 */
+        pre {
+            margin: 0;
+            background: transparent !important;
+        }
+        
         code {
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
             font-size: 14px;
-            line-height: 1.5;
+            line-height: 1.6;
+            border-radius: 4px;
         }
 
-        /* Diff2Html 覆寫樣式以適配深色模式 */
-        .d2h-file-header { display: none; } /* 隱藏預設檔頭，使用自定義標題 */
-        .d2h-wrapper { background-color: #fff; border-radius: 5px; }
+        /* 標題行在程式碼中的樣式 (Single View) */
+        .section-header-line {
+            background-color: rgba(197, 134, 192, 0.15); /* 淡淡的紫色背景 */
+            border-left: 4px solid var(--header-highlight);
+            display: block;
+            width: 100%;
+        }
+
+        /* Diff2Html 樣式覆寫 */
+        .d2h-wrapper { background-color: transparent; }
+        .d2h-file-header { display: none; }
+        .d2h-file-wrapper { border: 1px solid var(--border-color); margin-bottom: 0; }
+        
+        /* 確保 Diff View 也能看到完整寬度 */
+        .d2h-code-line {
+            white-space: pre-wrap !important; /* 自動換行，避免橫向捲動過長 */
+        }
+        
+        /* 針對 Diff View 中的標題行 */
+        tr[data-header="true"] td {
+            background-color: rgba(197, 134, 192, 0.15) !important;
+        }
+
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <h2>Shell Script Reader / Diff Tool</h2>
-        <div class="upload-area">
-            <p>請選擇 1 個 .sh 檔案進行閱讀，或選擇 2 個 .sh 檔案進行差異比對。</p>
-            <input type="file" id="fileInput" accept=".sh,.txt" multiple>
-        </div>
+<div class="top-bar">
+    <div>
+        <h2 style="margin:0; color: #fff;">Shell Script Reader</h2>
+    </div>
+    <div class="drop-zone" id="dropZone">
+        <p>📂 點擊選擇或將檔案拖曳至此 (支援 1 或 2 個 .sh 檔)</p>
+        <input type="file" id="fileInput" accept=".sh,.txt" multiple>
+    </div>
+</div>
+
+<div class="main-container">
+    <div class="sidebar">
+        <h3>結構導航</h3>
+        <ul class="nav-list" id="navList">
+            <li style="padding: 15px; color: #666; font-style: italic;">尚未載入檔案...</li>
+        </ul>
     </div>
 
-    <div id="output-area"></div>
+    <div class="content-area" id="outputArea">
+        </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
