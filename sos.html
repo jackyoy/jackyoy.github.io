@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v12 (Chart & Sort)</title>
+    <title>RHEL SOS Analyzer v13 (RHEL 8/9 Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -11,32 +11,26 @@
         :root { --sidebar-width: 260px; --bg-dark: #1e1e2f; --accent: #0d6efd; }
         body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, sans-serif; height: 100vh; overflow: hidden; display: flex; }
         
-        /* Layout */
         .sidebar { width: var(--sidebar-width); background: var(--bg-dark); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
         .nav-link { color: rgba(255,255,255,0.7); padding: 12px 20px; cursor: pointer; border-left: 3px solid transparent; }
         .nav-link:hover, .nav-link.active { color: #fff; background: rgba(255,255,255,0.1); border-left-color: var(--accent); }
         .main-content { flex: 1; overflow-y: auto; padding: 25px; }
         
-        /* Cards */
         .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
         .card-header { font-weight: 600; background: #fff; border-bottom: 1px solid #eee; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
         .source-badge { font-size: 0.75rem; color: #fff; background-color: #6c757d; padding: 2px 8px; border-radius: 4px; font-weight: normal; font-family: monospace; }
-        
-        /* Console Box */
         .console-box { background: #2d2d3b; color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
         
-        /* Upload & Drag Drop */
         .upload-wrapper { height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .upload-box { border: 2px dashed #ccc; padding: 60px; border-radius: 16px; background: #fff; text-align: center; cursor: pointer; width: 600px; transition: all 0.2s; }
         .upload-box:hover, .upload-box.drag-over { border-color: var(--accent); background: #f0f8ff; transform: scale(1.02); }
         .upload-icon { font-size: 3rem; margin-bottom: 15px; color: #6c757d; }
         
-        /* Sortable Table */
         .sortable-th { cursor: pointer; user-select: none; }
         .sortable-th:hover { background-color: #e9ecef; }
         .sort-icon { font-size: 0.8em; margin-left: 5px; color: #999; }
         
-        /* Log Explorer */
+        /* Log Tree */
         .log-container { display: flex; height: calc(100vh - 120px); gap: 15px; border: 1px solid #ddd; background: #fff; border-radius: 8px; overflow: hidden; }
         .log-tree { width: 30%; background: #f8f9fa; border-right: 1px solid #ddd; overflow-y: auto; font-size: 0.9rem; }
         .log-viewer { width: 70%; background: #1e1e1e; color: #ccc; font-family: monospace; padding: 15px; overflow-y: auto; white-space: pre; font-size: 0.85rem; display: flex; flex-direction: column; }
@@ -51,7 +45,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v12</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v13</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -63,21 +57,19 @@
     </div>
 
     <div class="main-content">
-        <div id="loader" class="alert alert-info hidden">正在解析檔案與建立索引...</div>
+        <div id="loader" class="alert alert-info hidden">正在解析檔案...</div>
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" id="drop-zone" onclick="document.getElementById('dir-input').click()">
                 <div class="upload-icon">📂</div>
                 <h4>上傳 SOS Report</h4>
-                <p class="text-muted">拖曳資料夾到此處 或 點擊上傳</p>
-                <div class="small text-secondary mt-2">支援遞迴目錄解析 (Recursive Scan)</div>
+                <p class="text-muted">拖曳資料夾 或 點擊上傳 (支援 RHEL 7/8/9)</p>
                 <input type="file" id="dir-input" webkitdirectory directory multiple class="d-none">
             </div>
         </div>
 
         <div id="view-dashboard" class="content-view hidden">
             <h4 class="mb-3">系統總覽</h4>
-            
             <div class="row g-3 mb-4">
                 <div class="col-md-3"><div class="card p-3 text-center"><small class="text-muted">Hostname</small><div class="fw-bold text-primary" id="dash-hostname">-</div></div></div>
                 <div class="col-md-3"><div class="card p-3 text-center"><small class="text-muted">Release</small><div class="fw-bold" id="dash-release">-</div></div></div>
@@ -90,20 +82,15 @@
                     <div class="card h-100">
                         <div class="card-header">Memory Usage <span class="source-badge" id="src-mem">Pending</span></div>
                         <div class="card-body d-flex flex-column align-items-center justify-content-center">
-                            <div style="width: 200px; height: 200px; position: relative;">
-                                <canvas id="memChart"></canvas>
-                            </div>
-                            <div class="mt-3 small text-muted text-center" id="mem-text">
-                                Waiting for data...
-                            </div>
+                            <div style="width: 200px; height: 200px; position: relative;"><canvas id="memChart"></canvas></div>
+                            <div class="mt-3 small text-muted text-center" id="mem-text">Waiting...</div>
                         </div>
                     </div>
                 </div>
-
                 <div class="col-md-8">
                     <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between">
-                            <span>Top Processes (Sortable)</span>
+                        <div class="card-header">
+                            <span>Top Processes</span>
                             <span class="source-badge" id="src-ps-dash">Pending</span>
                         </div>
                         <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
@@ -122,6 +109,27 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div id="view-network" class="content-view hidden">
+             <h4 class="mb-3">網路分析</h4>
+             <div class="card">
+                <div class="card-header">
+                    <div>Listening Ports <span class="source-badge" id="src-ss">Pending</span></div>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="net-source" id="btn-netstat" autocomplete="off" onchange="renderNetwork('netstat')">
+                        <label class="btn btn-outline-secondary" for="btn-netstat">Netstat</label>
+
+                        <input type="radio" class="btn-check" name="net-source" id="btn-ss" autocomplete="off" onchange="renderNetwork('ss')">
+                        <label class="btn btn-outline-secondary" for="btn-ss">SS</label>
+                    </div>
+                </div>
+                <div class="card-body"><div class="console-box" id="net-ss">Searching...</div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">IP Address <span class="source-badge" id="src-ip">Pending</span></div>
+                <div class="card-body"><div class="console-box" id="net-ip">Searching...</div></div>
             </div>
         </div>
 
@@ -168,18 +176,6 @@
             </div>
         </div>
 
-        <div id="view-network" class="content-view hidden">
-             <h4 class="mb-3">網路分析</h4>
-             <div class="card">
-                <div class="card-header">Listening Ports <span class="source-badge" id="src-ss">Pending</span></div>
-                <div class="card-body"><div class="console-box" id="net-ss">Searching...</div></div>
-            </div>
-            <div class="card">
-                <div class="card-header">IP Address <span class="source-badge" id="src-ip">Pending</span></div>
-                <div class="card-body"><div class="console-box" id="net-ip">Searching...</div></div>
-            </div>
-        </div>
-
         <div id="view-logs" class="content-view hidden">
             <h4 class="mb-3">日誌瀏覽器</h4>
             <div class="log-container">
@@ -201,20 +197,18 @@
     </div>
 
     <script>
-        // --- Global State ---
         const App = {
-            files: new Map(),
-            filePaths: [],
-            cache: {},
-            currentLogText: "",
-            fullSysctlText: "",
-            processList: [], // Store parsed processes for sorting
-            memChart: null,  // Chart instance
-            
+            files: new Map(), filePaths: [], cache: {}, 
+            currentLogText: "", fullSysctlText: "", processList: [], memChart: null,
+            netData: { ss: null, netstat: null }, // Store raw network data
+
+            // 修正：針對 RHEL 8/9 的檔名變異與排除路由表
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                netstat: [/netstat.*neopa$/, /netstat.*-W.*$/, /netstat$/],
-                ss: [/ss_-tulpn$/],
+                // Netstat: 優先找 neopa/pan (port lists), 避免 -r (routing)
+                netstat: [/netstat.*neopa$/, /netstat.*pan$/, /netstat_-W_-neopa$/, /netstat$/],
+                // SS: 優先找 tulpn
+                ss: [/ss_-tulpn$/, /ss_-.*ua.*$/, /ss$/],
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
@@ -223,13 +217,12 @@
                 ip: [/ip_.*addr$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
-                // New Memory rules
                 free: [/sos_commands\/memory\/free$/, /free$/],
                 meminfo: [/proc\/meminfo$/, /meminfo$/]
             }
         };
 
-        // --- Drag and Drop Logic ---
+        // --- Drag & Drop ---
         const dropZone = document.getElementById('drop-zone');
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
@@ -237,44 +230,31 @@
             e.preventDefault(); dropZone.classList.remove('drag-over');
             const items = e.dataTransfer.items;
             if (!items) return;
-            toggleLoader(true);
-            resetState();
-            
+            toggleLoader(true); resetState();
             const queue = [];
             for (let i = 0; i < items.length; i++) {
                 const entry = items[i].webkitGetAsEntry();
                 if (entry) queue.push(traverseFileTree(entry));
             }
             await Promise.all(queue);
-            generateDebugLog("[DROP]");
             startAnalysis();
         });
 
-        // --- File Input Logic ---
         document.getElementById('dir-input').addEventListener('change', async (e) => {
             const fileList = e.target.files;
             if (!fileList.length) return;
-            toggleLoader(true);
-            resetState();
-            
+            toggleLoader(true); resetState();
             for (let f of fileList) {
                 const parts = f.webkitRelativePath.split('/');
                 const relPath = parts.slice(1).join('/');
                 if (f.size > 0) { App.files.set(relPath, f); App.filePaths.push(relPath); }
             }
-            generateDebugLog("[FILE]");
             startAnalysis();
         });
 
         function resetState() {
-            App.files.clear(); App.filePaths = []; App.cache = {}; App.processList = [];
+            App.files.clear(); App.filePaths = []; App.cache = {}; App.processList = []; App.netData = { ss: null, netstat: null };
             if (App.memChart) { App.memChart.destroy(); App.memChart = null; }
-        }
-
-        function generateDebugLog(prefix) {
-            let log = `--- ${prefix} Import ---\n`;
-            App.filePaths.forEach(p => log += `${p}\n`);
-            document.getElementById('debug-list').textContent = log;
         }
 
         async function traverseFileTree(item, path = "") {
@@ -310,305 +290,238 @@
 
         async function startAnalysis() {
             try {
+                // Debug Log
+                let log = "--- Loaded Files ---\n";
+                App.filePaths.forEach(p => log += p + "\n");
+                document.getElementById('debug-list').textContent = log;
+
                 await Promise.all([
-                    runDashboard(), 
-                    runMemoryAnalysis(), // New Chart Logic
-                    runHostInfo(), 
-                    runKernel(), 
-                    runNetwork(),
-                    buildLogTree()
+                    runDashboard(), runMemoryAnalysis(), runHostInfo(), runKernel(), runNetwork(), buildLogTree()
                 ]);
                 document.getElementById('view-upload').classList.add('hidden');
                 switchTab('dashboard');
-            } catch (err) {
-                console.error(err);
-                alert("Error: " + err.message);
-            } finally {
-                toggleLoader(false);
+            } catch (err) { console.error(err); alert("Error: " + err.message); } 
+            finally { toggleLoader(false); }
+        }
+
+        async function findAndRead(ruleKey, validateFn = null) {
+            const regexList = App.rules[ruleKey];
+            if (!regexList) return { content: null, path: null };
+            
+            // 優先尋找符合 regex 的路徑
+            const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
+            if (matches.length === 0) return { content: null, path: null };
+            
+            // 排序：路徑長的通常是 sos_commands 深層目錄，優先權較高
+            matches.sort((a, b) => b.length - a.length);
+            
+            // 嘗試讀取並驗證內容
+            for (let path of matches) {
+                // 優先選擇 sos_commands 目錄下的檔案
+                if (matches.find(m => m.includes('sos_commands')) && !path.includes('sos_commands')) continue;
+
+                if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
+                const content = App.cache[path];
+
+                // 如果有驗證函式，確保內容不是空的或錯誤的 (例如 routing table 被誤判為 port list)
+                if (validateFn && !validateFn(content)) continue;
+
+                return { content, path };
+            }
+            
+            // Fallback: 如果驗證都失敗，回傳第一個
+            const fallback = matches[0];
+            if (!App.cache[fallback]) App.cache[fallback] = await App.files.get(fallback).text();
+            return { content: App.cache[fallback], path: fallback };
+        }
+
+        // --- Network Analysis (Fixed) ---
+        async function runNetwork() {
+            // 驗證函式：確保檔案看起來像 Port 列表，而不是 Routing Table
+            const isValidPortList = (text) => {
+                return text.includes('Proto') || text.includes('State') || text.includes('LISTEN') || text.includes('ESTAB');
+            };
+
+            // 1. Try Find Netstat (RHEL 8 preferred)
+            const net = await findAndRead('netstat', isValidPortList);
+            if (net.content && isValidPortList(net.content)) {
+                App.netData.netstat = { content: net.content, path: net.path };
+            }
+
+            // 2. Try Find SS
+            const ss = await findAndRead('ss', isValidPortList);
+            if (ss.content && isValidPortList(ss.content)) {
+                App.netData.ss = { content: ss.content, path: ss.path };
+            }
+
+            // 3. Decide what to show default
+            if (App.netData.netstat) {
+                document.getElementById('btn-netstat').checked = true;
+                renderNetwork('netstat');
+            } else if (App.netData.ss) {
+                document.getElementById('btn-ss').checked = true;
+                renderNetwork('ss');
+            } else {
+                document.getElementById('net-ss').textContent = "No valid 'ss' or 'netstat' output found.";
+                showSrc('src-ss', null);
             }
         }
 
-        async function findAndRead(ruleKey) {
-            const regexList = App.rules[ruleKey];
-            if (!regexList) return { content: null, path: null };
-            const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
-            if (matches.length === 0) return { content: null, path: null };
-            matches.sort((a, b) => b.length - a.length);
-            const foundPath = matches.find(m => m.includes('sos_commands')) || matches[0];
-            if (!App.cache[foundPath]) App.cache[foundPath] = await App.files.get(foundPath).text();
-            return { content: App.cache[foundPath], path: foundPath };
-        }
+        window.renderNetwork = function(type) {
+            const data = App.netData[type];
+            if (!data) {
+                document.getElementById('net-ss').textContent = "Data not available for " + type;
+                return;
+            }
+            showSrc('src-ss', data.path);
+            
+            const lines = data.content.split('\n');
+            let output = "";
+            
+            if (type === 'netstat') {
+                // Netstat filter
+                // Header contains 'Proto', Ports usually 'LISTEN' or 'ESTABLISHED'
+                const headers = lines.filter(l => l.includes('Proto'));
+                const content = lines.filter(l => l.includes('LISTEN') || l.includes('UDP')); 
+                // UDP sometimes doesn't say LISTEN in old netstat, so we include it broadly or just LISTEN
+                // RHEL 8 netstat usually has LISTEN.
+                output = [...headers, ...lines.filter(l => l.includes('LISTEN') || (l.includes('udp') && !l.includes('ESTAB')))].join('\n');
+            } else {
+                // SS Filter
+                output = lines.filter(l => l.includes('State') || l.includes('LISTEN')).join('\n');
+            }
+            
+            // If filtering killed everything, show raw header + first few lines
+            if (output.length < 50) {
+                 output = lines.slice(0, 50).join('\n'); // Fallback to raw
+            }
 
-        // --- Memory Analysis (Chart) ---
+            document.getElementById('net-ss').textContent = output;
+        };
+
+        // --- Memory Chart ---
         async function runMemoryAnalysis() {
-            // Try 'free' command first
             let mem = await findAndRead('free');
-            let total = 0, used = 0, free = 0, buff = 0;
-            let unit = 'KB'; // default output of free is KB usually
-            let src = '';
-
+            let total = 0, used = 0, free = 0, buff = 0, src = '';
             if (mem.content) {
                 src = mem.path;
                 const lines = mem.content.split('\n');
                 const memLine = lines.find(l => l.startsWith('Mem:'));
                 if (memLine) {
                     const parts = memLine.split(/\s+/);
-                    // Format: Mem: total used free shared buff/cache available
-                    total = parseFloat(parts[1]);
-                    used = parseFloat(parts[2]);
-                    free = parseFloat(parts[3]);
-                    buff = parseFloat(parts[5]); // buff/cache
-                    // If output is in bytes/human readable, this naive parse might fail, 
-                    // but SOS typically uses standard `free` or `free -k`
+                    total = parseFloat(parts[1]); used = parseFloat(parts[2]); free = parseFloat(parts[3]); buff = parseFloat(parts[5]);
                 }
             } else {
-                // Fallback to meminfo
                 mem = await findAndRead('meminfo');
                 if (mem.content) {
                     src = mem.path;
-                    const getVal = (k) => {
-                        const m = mem.content.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm'));
-                        return m ? parseInt(m[1]) : 0;
-                    };
-                    total = getVal('MemTotal');
-                    const memFree = getVal('MemFree');
-                    const buffers = getVal('Buffers');
-                    const cached = getVal('Cached');
-                    const reclaim = getVal('SReclaimable');
-                    buff = buffers + cached + reclaim;
-                    free = memFree;
-                    used = total - free - buff;
+                    const getVal = (k) => { const m = mem.content.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm')); return m ? parseInt(m[1]) : 0; };
+                    total = getVal('MemTotal'); free = getVal('MemFree'); buff = getVal('Buffers') + getVal('Cached') + getVal('SReclaimable'); used = total - free - buff;
                 }
             }
-
             showSrc('src-mem', src);
-
             if (total > 0) {
                 renderMemChart(used, free, buff);
                 const toGB = (v) => (v / 1024 / 1024).toFixed(1) + ' GB';
-                document.getElementById('mem-text').innerHTML = 
-                    `Total: ${toGB(total)}<br>Used: ${toGB(used)} | Free: ${toGB(free)} | Cache: ${toGB(buff)}`;
-            } else {
-                document.getElementById('mem-text').textContent = "Memory data not found";
-            }
+                document.getElementById('mem-text').innerHTML = `Total: ${toGB(total)}<br>Used: ${toGB(used)} | Free: ${toGB(free)} | Cache: ${toGB(buff)}`;
+            } else { document.getElementById('mem-text').textContent = "No data"; }
         }
 
         function renderMemChart(used, free, buff) {
             const ctx = document.getElementById('memChart').getContext('2d');
             if (App.memChart) App.memChart.destroy();
-            
             App.memChart = new Chart(ctx, {
                 type: 'doughnut',
-                data: {
-                    labels: ['Used', 'Free', 'Buff/Cache'],
-                    datasets: [{
-                        data: [used, free, buff],
-                        backgroundColor: ['#dc3545', '#198754', '#ffc107'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false } // Hide legend to save space
-                    },
-                    cutout: '70%'
-                }
+                data: { labels: ['Used', 'Free', 'Buff/Cache'], datasets: [{ data: [used, free, buff], backgroundColor: ['#dc3545', '#198754', '#ffc107'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '70%' }
             });
         }
 
-        // --- Process Table & Sorting ---
+        // --- Process Table ---
         async function runHostInfo() {
-            // PS
             const ps = await findAndRead('ps');
-            showSrc('src-ps-dash', ps.path);
-            showSrc('src-ps-mid', ps.path);
-            
+            showSrc('src-ps-dash', ps.path); showSrc('src-ps-mid', ps.path);
             if (ps.content) {
                 const lines = ps.content.split('\n');
                 let hIdx = -1;
-                for(let i=0; i<Math.min(50, lines.length); i++) {
-                    if (lines[i].includes('PID') && lines[i].includes('%MEM')) { hIdx = i; break; }
-                }
-
+                for(let i=0; i<Math.min(50, lines.length); i++) { if (lines[i].includes('PID') && lines[i].includes('%MEM')) { hIdx = i; break; } }
                 if (hIdx !== -1) {
                     const parsed = [];
                     for (let i = hIdx + 1; i < lines.length; i++) {
-                        const l = lines[i].trim();
-                        if (!l) continue;
+                        const l = lines[i].trim(); if (!l) continue;
                         const p = l.split(/\s+/);
-                        // Filter kernel threads (pid is - or non-numeric)
                         if (p[1] === '-' || isNaN(parseInt(p[1]))) continue;
                         if (p.length < 10) continue;
-
-                        const mem = parseFloat(p[3]);
-                        const cpu = parseFloat(p[2]);
-                        if (!isNaN(mem)) {
-                            parsed.push({ 
-                                user: p[0], 
-                                pid: parseInt(p[1]), 
-                                mem: mem, 
-                                cpu: cpu, 
-                                cmd: p.slice(10).join(' ') 
-                            });
-                        }
+                        const mem = parseFloat(p[3]); const cpu = parseFloat(p[2]);
+                        if (!isNaN(mem)) parsed.push({ user: p[0], pid: parseInt(p[1]), mem, cpu, cmd: p.slice(10).join(' ') });
                     }
                     App.processList = parsed;
-                    // Initial sort by MEM desc, show top 50
                     sortProcs('mem', 'desc');
-
-                    // Middleware
                     const mwRegex = /java|python|node|httpd|nginx|mysql|postgres|docker|kube/i;
                     const mw = parsed.filter(p => mwRegex.test(p.cmd) && !p.cmd.includes(' grep '));
                     document.getElementById('info-middleware').textContent = mw.length ? mw.map(p=>`${p.user} (${p.pid}): ${p.cmd}`).join('\n') : "No common middleware found.";
                 }
             }
-
-            // DMI
             const dmi = await findAndRead('dmidecode');
             showSrc('src-dmi', dmi.path);
             if(dmi.content) {
                 const prod = (dmi.content.match(/Product Name:\s*(.+)/)||[])[1];
                 const vend = (dmi.content.match(/Manufacturer:\s*(.+)/)||[])[1];
                 const bios = (dmi.content.match(/Version:\s*(.+)/)||[])[1];
-                if(prod) document.getElementById('info-model').textContent = prod;
-                if(vend) document.getElementById('info-vendor').textContent = vend;
-                if(bios) document.getElementById('info-bios').textContent = bios;
+                if(prod) document.getElementById('info-model').textContent = prod; if(vend) document.getElementById('info-vendor').textContent = vend; if(bios) document.getElementById('info-bios').textContent = bios;
             }
         }
 
-        // Sorting Logic
         let currentSort = { key: 'mem', order: 'desc' };
-        
         window.sortProcs = function(key) {
-            // Toggle order if same key
-            if (currentSort.key === key) {
-                currentSort.order = currentSort.order === 'desc' ? 'asc' : 'desc';
-            } else {
-                currentSort.key = key;
-                currentSort.order = 'desc'; // Default desc for new key
-            }
-            updateSortIcons();
-            renderProcTable();
-        };
-
-        function updateSortIcons() {
+            if (currentSort.key === key) currentSort.order = currentSort.order === 'desc' ? 'asc' : 'desc';
+            else { currentSort.key = key; currentSort.order = 'desc'; }
             document.querySelectorAll('.sort-icon').forEach(el => el.textContent = '');
-            const icon = currentSort.order === 'desc' ? '▼' : '▲';
-            document.getElementById(`sort-${currentSort.key}`).textContent = icon;
-        }
-
-        function renderProcTable() {
-            const { key, order } = currentSort;
+            document.getElementById(`sort-${currentSort.key}`).textContent = currentSort.order === 'desc' ? '▼' : '▲';
             const sorted = [...App.processList].sort((a, b) => {
-                if (key === 'cmd' || key === 'user') {
-                    return order === 'asc' ? a[key].localeCompare(b[key]) : b[key].localeCompare(a[key]);
-                } else {
-                    return order === 'asc' ? a[key] - b[key] : b[key] - a[key];
-                }
+                if (key === 'cmd' || key === 'user') return currentSort.order === 'asc' ? a[key].localeCompare(b[key]) : b[key].localeCompare(a[key]);
+                return currentSort.order === 'asc' ? a[key] - b[key] : b[key] - a[key];
             });
-            
-            // Show Top 50
-            const top50 = sorted.slice(0, 50);
-            
-            document.getElementById('mem-table-body').innerHTML = top50.map(p => 
-                `<tr>
-                    <td>${p.pid}</td>
-                    <td>${p.user}</td>
-                    <td>${p.mem}%</td>
-                    <td>${p.cpu}%</td>
-                    <td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td>
-                </tr>`
-            ).join('');
-        }
+            document.getElementById('mem-table-body').innerHTML = sorted.slice(0, 50).map(p => `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td>${p.cpu}%</td><td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td></tr>`).join('');
+        };
 
         // --- Other Modules ---
         async function runDashboard() {
-            const h = await findAndRead('hostname');
-            if(h.content) document.getElementById('dash-hostname').textContent = h.content.trim();
-            const r = await findAndRead('release');
-            if(r.content) document.getElementById('dash-release').textContent = r.content.split('\n')[0];
-            const u = await findAndRead('uptime');
-            if(u.content) document.getElementById('dash-uptime').textContent = u.content.trim();
-            const k = await findAndRead('uname');
-            if (k.content) {
-                const p = k.content.split(' ');
-                document.getElementById('dash-kernel').textContent = p.length >= 3 ? p[2] : k.content;
-            }
+            const h = await findAndRead('hostname'); if(h.content) document.getElementById('dash-hostname').textContent = h.content.trim();
+            const r = await findAndRead('release'); if(r.content) document.getElementById('dash-release').textContent = r.content.split('\n')[0];
+            const u = await findAndRead('uptime'); if(u.content) document.getElementById('dash-uptime').textContent = u.content.trim();
+            const k = await findAndRead('uname'); if(k.content) { const p = k.content.split(' '); document.getElementById('dash-kernel').textContent = p.length>=3?p[2]:k.content; }
         }
-
         async function runKernel() {
-            // LSMOD
-            const ls = await findAndRead('lsmod');
-            showSrc('src-lsmod', ls.path);
-            if (ls.content) {
+            const ls = await findAndRead('lsmod'); showSrc('src-lsmod', ls.path);
+            if(ls.content) {
                 const lines = ls.content.split('\n');
-                let modules = [];
-                lines.forEach(l => {
-                    const p = l.split(/\s+/);
-                    if (p.length >= 2 && p[0] !== 'Module') {
-                        const s = parseInt(p[1]);
-                        if (!isNaN(s)) modules.push({ name: p[0], size: s, used: p[2] || '-' });
-                    }
-                });
-                document.getElementById('lsmod-count').textContent = modules.length;
-                const top10 = modules.sort((a,b)=>b.size-a.size).slice(0,10);
-                document.getElementById('lsmod-body').innerHTML = top10.map(m=>`<tr><td>${m.name}</td><td>${(m.size/1024).toFixed(2)} KB</td><td>${m.used}</td></tr>`).join('');
+                let mods = []; lines.forEach(l=>{const p=l.split(/\s+/); if(p.length>=2&&p[0]!=='Module'){const s=parseInt(p[1]);if(!isNaN(s))mods.push({name:p[0],size:s,used:p[2]||'-'});}});
+                document.getElementById('lsmod-count').textContent = mods.length;
+                document.getElementById('lsmod-body').innerHTML = mods.sort((a,b)=>b.size-a.size).slice(0,10).map(m=>`<tr><td>${m.name}</td><td>${(m.size/1024).toFixed(2)} KB</td><td>${m.used}</td></tr>`).join('');
             }
-            // SYSCTL
-            const sys = await findAndRead('sysctl');
-            showSrc('src-sysctl', sys.path);
-            if (sys.content) {
-                App.fullSysctlText = sys.content;
-                filterSysctl();
-            }
+            const sys = await findAndRead('sysctl'); showSrc('src-sysctl', sys.path);
+            if(sys.content) { App.fullSysctlText = sys.content; filterSysctl(); }
         }
         function filterSysctl() {
             const t = document.getElementById('sysctl-search').value.toLowerCase();
             const lines = App.fullSysctlText.split('\n');
-            const f = t ? lines.filter(l=>l.toLowerCase().includes(t)) : lines.slice(0, 100);
-            document.getElementById('sysctl-box').textContent = f.join('\n');
+            document.getElementById('sysctl-box').textContent = (t ? lines.filter(l=>l.toLowerCase().includes(t)) : lines.slice(0,100)).join('\n');
         }
-
-        async function runNetwork() {
-            let net = await findAndRead('netstat');
-            let type = 'netstat';
-            if(!net.content) { net = await findAndRead('ss'); type='ss'; }
-            showSrc('src-ss', net.path);
-            if(net.content) {
-                const lines = net.content.split('\n');
-                const filter = type==='netstat' ? ['Proto','LISTEN'] : ['State','LISTEN'];
-                document.getElementById('net-ss').textContent = lines.filter(l => filter.some(k=>l.includes(k))).join('\n') || "No LISTEN ports";
-            }
-            const ip = await findAndRead('ip');
-            showSrc('src-ip', ip.path);
-            if(ip.content) document.getElementById('net-ip').textContent = ip.content;
-        }
-
-        // --- Log Tree ---
         function buildLogTree() {
-            const tree = document.getElementById('log-tree');
-            tree.innerHTML = '';
+            const tree = document.getElementById('log-tree'); tree.innerHTML = '';
             const cats = { "System": [/messages/, /dmesg/, /boot/], "Security": [/secure/, /audit/], "Package": [/dnf/, /yum/], "Cron": [/cron/], "Others": [] };
             const found = { "System": [], "Security": [], "Package": [], "Cron": [], "Others": [] };
             App.filePaths.forEach(p => {
                 if (!p.match(/var\/log|sos_commands\/logs|dmesg/)) return;
                 if (p.match(/\.gz$|wtmp|lastlog/)) return;
-                let m = false;
-                for(let c in cats) {
-                    if (c==='Others') continue;
-                    if(cats[c].some(r=>r.test(p))) { found[c].push(p); m=true; break; }
-                }
+                let m = false; for(let c in cats){ if(c==='Others')continue; if(cats[c].some(r=>r.test(p))){ found[c].push(p); m=true; break; } }
                 if(!m && p.includes('var/log')) found['Others'].push(p);
             });
             for(let c in found) {
                 if(!found[c].length) continue;
-                const g = document.createElement('div'); g.className = 'log-group'; g.textContent = c; tree.appendChild(g);
-                found[c].sort().forEach(p => {
-                    const i = document.createElement('div'); i.className = 'log-item'; i.textContent = p.split('/').pop();
-                    i.onclick = () => loadLog(p, i); tree.appendChild(i);
-                });
+                const g = document.createElement('div'); g.className='log-group'; g.textContent=c; tree.appendChild(g);
+                found[c].sort().forEach(p => { const i=document.createElement('div'); i.className='log-item'; i.textContent=p.split('/').pop(); i.onclick=()=>loadLog(p,i); tree.appendChild(i); });
             }
         }
         async function loadLog(path, el) {
@@ -621,11 +534,8 @@
         }
         function filterLogContent() {
             const t = document.getElementById('log-search-input').value.toLowerCase();
-            const v = document.getElementById('log-content-area');
-            v.textContent = t ? App.currentLogText.split('\n').filter(l=>l.toLowerCase().includes(t)).join('\n') : App.currentLogText;
+            document.getElementById('log-content-area').textContent = t ? App.currentLogText.split('\n').filter(l=>l.toLowerCase().includes(t)).join('\n') : App.currentLogText;
         }
-
-        // --- Utils ---
         function toggleLoader(s) { document.getElementById('loader').classList.toggle('hidden', !s); }
         function showSrc(id, p) { const el=document.getElementById(id); if(el) el.textContent = p?`SRC: .../${p.split('/').pop()}`:'Not Found'; }
         function switchTab(id) {
