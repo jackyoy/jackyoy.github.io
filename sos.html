@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v6 (Deep Scan)</title>
+    <title>RHEL SOS Analyzer v7 (Smart Parse)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <style>
@@ -16,47 +16,37 @@
         
         .main-content { flex: 1; overflow-y: auto; padding: 25px; }
         .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .card-header { font-weight: 600; background: #fff; border-bottom: 1px solid #eee; padding: 12px 20px; }
+        .card-header { font-weight: 600; background: #fff; border-bottom: 1px solid #eee; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .source-badge { font-size: 0.7rem; color: #999; font-weight: normal; font-family: monospace; }
+        
         .console-box { background: #2d2d3b; color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
         
         .upload-wrapper { height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .upload-box { border: 2px dashed #ccc; padding: 40px; border-radius: 12px; background: #fff; text-align: center; cursor: pointer; width: 500px; }
-        .upload-box:hover { border-color: #0d6efd; background: #f8fbff; }
-
-        /* Logs */
-        .log-container { display: flex; height: calc(100vh - 120px); gap: 15px; border: 1px solid #ddd; background: #fff; border-radius: 8px; overflow: hidden; }
-        .log-tree { width: 30%; background: #f8f9fa; border-right: 1px solid #ddd; overflow-y: auto; font-size: 0.9rem; }
-        .log-viewer { width: 70%; background: #1e1e1e; color: #ccc; font-family: monospace; padding: 15px; overflow-y: auto; white-space: pre; font-size: 0.85rem; }
-        .log-group { padding: 8px 15px; font-weight: bold; background: #e9ecef; border-bottom: 1px solid #dee2e6; font-size: 0.8rem; text-transform: uppercase; color: #555; }
-        .log-item { padding: 6px 20px; cursor: pointer; border-bottom: 1px solid #f1f1f1; }
-        .log-item:hover { background: #e2e6ea; color: #0d6efd; }
-        .log-item.active { background: #0d6efd; color: #fff; }
-
+        
         .hidden { display: none !important; }
-        .badge-path { font-size: 0.65rem; opacity: 0.7; font-weight: normal; margin-left: 5px; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v6</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v7</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統深度評估</a>
-            <a class="nav-link" onclick="switchTab('logs')">📝 日誌瀏覽器</a>
             <a class="nav-link" onclick="switchTab('network')">🌐 網路狀態</a>
-            <a class="nav-link" onclick="switchTab('debug')">🐞 除錯資訊 (Files)</a>
+            <a class="nav-link" onclick="switchTab('debug')">🐞 檔案除錯</a>
         </nav>
     </div>
 
     <div class="main-content">
-        <div id="loader" class="alert alert-info hidden">正在解析檔案... <span id="load-count"></span></div>
+        <div id="loader" class="alert alert-info hidden">解析中...</div>
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" onclick="document.getElementById('dir-input').click()">
                 <div class="fs-1 mb-2">📂</div>
-                <h4>上傳 SOS Report 資料夾</h4>
-                <p class="text-muted small">請上傳解壓縮後的目錄<br>(自動過濾無效捷徑)</p>
+                <h4>上傳 SOS Report</h4>
+                <p class="text-muted small">選擇解壓縮後的資料夾</p>
                 <input type="file" id="dir-input" webkitdirectory directory multiple class="d-none">
             </div>
         </div>
@@ -71,22 +61,17 @@
             </div>
             
             <div class="row mt-2">
-                <div class="col-md-7">
+                <div class="col-md-12">
                     <div class="card">
-                        <div class="card-header">Top Memory Processes</div>
+                        <div class="card-header">
+                            Top Memory Processes
+                            <span class="source-badge" id="src-ps-dash"></span>
+                        </div>
                         <div class="card-body p-0">
                             <table class="table table-sm table-hover mb-0" style="font-size:0.9rem">
-                                <thead class="table-light"><tr><th>PID</th><th>USER</th><th>MEM%</th><th>COMMAND</th></tr></thead>
+                                <thead class="table-light"><tr><th>PID</th><th>USER</th><th>MEM%</th><th>CPU%</th><th>COMMAND</th></tr></thead>
                                 <tbody id="mem-table-body"></tbody>
                             </table>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-5">
-                    <div class="card h-100">
-                        <div class="card-header">Last Boot Messages (dmesg)</div>
-                        <div class="card-body bg-dark text-light p-2" style="font-family:monospace; font-size:0.75rem; overflow:hidden;">
-                            <div id="dash-dmesg-preview">Waiting for data...</div>
                         </div>
                     </div>
                 </div>
@@ -95,70 +80,41 @@
 
         <div id="view-host-info" class="content-view hidden">
             <h4 class="mb-3">硬體與系統深度資訊</h4>
+            
             <div class="card">
-                <div class="card-header">Hardware & BIOS (dmidecode)</div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <ul class="list-group list-group-flush">
-                                <li class="list-group-item d-flex justify-content-between"><span>Product:</span> <strong id="info-model">-</strong></li>
-                                <li class="list-group-item d-flex justify-content-between"><span>Vendor:</span> <strong id="info-vendor">-</strong></li>
-                                <li class="list-group-item d-flex justify-content-between"><span>BIOS Ver:</span> <strong id="info-bios">-</strong></li>
-                            </ul>
-                        </div>
-                        <div class="col-md-6">
-                             <h6>PCI Storage/Network</h6>
-                             <div class="console-box" id="info-pci" style="height:120px">Pending...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header">Kernel & Security</div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <strong>SELinux:</strong> <span id="info-selinux">-</span><br>
-                            <strong>Tainted:</strong> <span id="info-tainted">-</span>
-                        </div>
-                        <div class="col-md-8">
-                            <div id="sysctl-box" class="small text-muted border p-2 bg-light">Scanning...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header">Middleware Processes</div>
+                <div class="card-header">Middleware Processes <span class="source-badge" id="src-ps-mid"></span></div>
                 <div class="card-body">
                     <div class="console-box" id="info-middleware">Scanning...</div>
                 </div>
             </div>
-        </div>
 
-        <div id="view-logs" class="content-view hidden">
-            <h4 class="mb-3">日誌瀏覽器 (Log Explorer)</h4>
-            <div class="log-container">
-                <div class="log-tree" id="log-tree"></div>
-                <div class="log-viewer" id="log-viewer">Select a file...</div>
+            <div class="card">
+                <div class="card-header">Hardware & BIOS <span class="source-badge" id="src-dmi"></span></div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">Product: <strong id="info-model">-</strong></li>
+                        <li class="list-group-item">Vendor: <strong id="info-vendor">-</strong></li>
+                        <li class="list-group-item">BIOS: <strong id="info-bios">-</strong></li>
+                    </ul>
+                </div>
             </div>
         </div>
 
         <div id="view-network" class="content-view hidden">
              <h4 class="mb-3">網路分析</h4>
              <div class="card">
-                <div class="card-header">Listening Ports (ss -tulpn)</div>
-                <div class="card-body"><div class="console-box" id="net-ss">Pending...</div></div>
+                <div class="card-header">Listening Ports (ss -tulpn) <span class="source-badge" id="src-ss"></span></div>
+                <div class="card-body"><div class="console-box" id="net-ss">Searching...</div></div>
             </div>
             <div class="card">
-                <div class="card-header">IP Address (ip addr)</div>
-                <div class="card-body"><div class="console-box" id="net-ip">Pending...</div></div>
+                <div class="card-header">IP Address <span class="source-badge" id="src-ip"></span></div>
+                <div class="card-body"><div class="console-box" id="net-ip">Searching...</div></div>
             </div>
         </div>
 
         <div id="view-debug" class="content-view hidden">
-            <h4>Loaded Files Index</h4>
-            <p>如果資料顯示不出來，請檢查這裡是否有找到對應的檔案 (忽略 0 bytes 的捷徑)。</p>
-            <div class="console-box" id="debug-list" style="max-height:80vh"></div>
+            <h4>File Index Debugger</h4>
+            <div class="console-box" id="debug-list"></div>
         </div>
 
     </div>
@@ -166,22 +122,20 @@
     <script>
         const App = {
             files: new Map(),
-            paths: [],
+            filePaths: [], // 儲存字串陣列，用於搜尋
             cache: {},
             
-            // 關鍵：定義優先搜尋順序。優先找深層目錄 (Content)，最後才找根目錄 (Symlink)
-            searchRules: {
-                hostname: ['sos_commands/host/hostname', 'hostname'],
-                release: ['etc/redhat-release', 'sos_commands/general/redhat-release', 'redhat-release'],
-                uptime: ['sos_commands/host/uptime', 'uptime'],
-                dmidecode: ['sos_commands/hardware/dmidecode', 'dmidecode'],
-                lspci: ['sos_commands/pci/lspci_-nnvv', 'lspci'],
-                sysctl: ['sos_commands/kernel/sysctl_-a', 'proc/sys/kernel/tainted'],
-                ps: ['sos_commands/process/ps_auxww', 'sos_commands/process/ps_aux', 'ps'],
-                ip: ['sos_commands/networking/ip_-o_addr', 'sos_commands/networking/ip_addr'],
-                ss: ['sos_commands/networking/ss_-tulpn', 'sos_commands/net/ss_-tulpn', 'ss_-tulpn'], // 增加 net 目錄
-                dmesg: ['sos_commands/kernel/dmesg', 'var/log/dmesg'],
-                sestatus: ['sos_commands/selinux/sestatus']
+            // Regex Search Rules (更寬鬆的匹配策略)
+            rules: {
+                // 只要包含 ps_aux 且不包含 jpg/gz 等非文字檔
+                ps: [/ps_auxww$/, /ps_aux$/, /ps$/], 
+                // 只要包含 ss_ 且包含 tulpn
+                ss: [/ss_.*tulpn/, /netstat.*tulpn/],
+                hostname: [/hostname$/],
+                release: [/redhat-release$/],
+                uptime: [/uptime$/],
+                dmidecode: [/dmidecode$/],
+                ip: [/ip_.*addr$/]
             }
         };
 
@@ -190,257 +144,204 @@
             if (!fileList.length) return;
 
             document.getElementById('loader').classList.remove('hidden');
-            document.getElementById('load-count').textContent = `正在索引 ${fileList.length} 個檔案...`;
             
-            // 1. Reset
+            // Reset
             App.files.clear();
-            App.paths = [];
+            App.filePaths = [];
             App.cache = {};
 
-            // 2. Indexing
-            let debugHtml = "";
+            // Indexing (Filter out empty symlinks)
+            let debugLog = "--- Indexing ---\n";
             for (let f of fileList) {
-                // 正規化路徑：移除最上層資料夾名稱，統一變成 relative path
-                // 例如: "sosreport-xxx/sos_commands/host/hostname" -> "sos_commands/host/hostname"
+                // 去除頂層目錄名稱，統一相對路徑
                 const parts = f.webkitRelativePath.split('/');
-                const relPath = parts.slice(1).join('/'); 
+                const relPath = parts.slice(1).join('/');
                 
-                // 忽略空檔案 (通常是無效的 Symlink)
                 if (f.size > 0) {
                     App.files.set(relPath, f);
-                    App.paths.push(relPath);
-                    debugHtml += `[${f.size} B] ${relPath}\n`;
+                    App.filePaths.push(relPath);
+                    debugLog += `[OK] ${relPath} (${f.size} bytes)\n`;
                 } else {
-                    debugHtml += `[SKIP 0 B] ${relPath}\n`;
+                    debugLog += `[SKIP] ${relPath} (0 bytes/Symlink)\n`;
                 }
             }
-            document.getElementById('debug-list').textContent = debugHtml;
+            document.getElementById('debug-list').textContent = debugLog;
 
-            // 3. Execution
             try {
-                await Promise.all([
-                    safeRun(renderDashboard),
-                    safeRun(renderHostInfo),
-                    safeRun(renderNetwork),
-                    safeRun(buildLogTree)
-                ]);
+                await Promise.all([runDashboard(), runHostInfo(), runNetwork()]);
                 document.getElementById('view-upload').classList.add('hidden');
                 switchTab('dashboard');
             } catch (err) {
                 console.error(err);
-                alert("解析過程發生嚴重錯誤，請查看 Console");
+                alert("解析錯誤: " + err.message);
             } finally {
                 document.getElementById('loader').classList.add('hidden');
             }
         });
 
-        // 錯誤隔離執行器
-        async function safeRun(fn) {
-            try { await fn(); } catch (e) { console.error("Module failed:", e); }
-        }
-
-        // 核心搜尋引擎
-        async function fetchContent(key) {
-            const candidates = App.searchRules[key] || [key];
+        // --- Core: Fuzzy Finder ---
+        async function findAndRead(ruleKey) {
+            const regexList = App.rules[ruleKey] || [new RegExp(ruleKey)];
             
-            for (let pattern of candidates) {
-                // 1. 精確匹配
-                if (App.files.has(pattern)) {
-                    return await readFile(App.files.get(pattern));
-                }
+            // 搜尋策略：遍歷所有檔案路徑，看是否有符合 Regex 的
+            let foundPath = null;
+
+            for (let regex of regexList) {
+                // 優先找路徑包含 sos_commands 的 (較可能是原始內容)
+                const candidates = App.filePaths.filter(p => regex.test(p));
                 
-                // 2. 結尾匹配 (處理路徑變異)
-                // 找出所有以 pattern 結尾的路徑，並取最短的那個 (通常最接近根目錄或標準路徑)
-                const matches = App.paths.filter(p => p.endsWith(pattern));
-                if (matches.length > 0) {
-                    // 這裡可以加強：如果有 sos_commands 的路徑優先使用
-                    const bestMatch = matches.find(p => p.includes('sos_commands')) || matches[0];
-                    return await readFile(App.files.get(bestMatch));
+                if (candidates.length > 0) {
+                    // 排序優化：優先選路徑較長的 (通常深層路徑是真檔案)，且包含 sos_commands
+                    candidates.sort((a, b) => {
+                        const scoreA = (a.includes('sos_commands') ? 10 : 0) + a.length;
+                        const scoreB = (b.includes('sos_commands') ? 10 : 0) + b.length;
+                        return scoreB - scoreA;
+                    });
+                    foundPath = candidates[0];
+                    break;
                 }
             }
-            return null;
+
+            if (foundPath) {
+                console.log(`Matched [${ruleKey}] -> ${foundPath}`);
+                if (!App.cache[foundPath]) {
+                    App.cache[foundPath] = await App.files.get(foundPath).text();
+                }
+                return { content: App.cache[foundPath], path: foundPath };
+            }
+            return { content: null, path: null };
         }
 
-        async function readFile(file) {
-            if (App.cache[file.name]) return App.cache[file.name];
-            const text = await file.text();
-            App.cache[file.name] = text;
-            return text;
+        function showSrc(id, path) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = path ? `Source: .../${path.split('/').pop()}` : '(Not Found)';
         }
 
         // --- Renderers ---
 
-        async function renderDashboard() {
-            // Hostname
-            const h = await fetchContent('hostname');
-            setText('dash-hostname', h ? h.trim() : 'Unknown');
+        async function runDashboard() {
+            // Basic Info
+            const h = await findAndRead('hostname');
+            if(h.content) document.getElementById('dash-hostname').textContent = h.content.trim();
 
-            // Release
-            const r = await fetchContent('release');
-            setText('dash-release', r ? r.trim() : 'Unknown');
+            const r = await findAndRead('release');
+            if(r.content) document.getElementById('dash-release').textContent = r.content.trim();
 
-            // Uptime
-            const u = await fetchContent('uptime');
-            setText('dash-uptime', u ? u.trim() : '-');
-
-            // Kernel
-            const dmesg = await fetchContent('dmesg');
-            if (dmesg) {
-                const lines = dmesg.split('\n');
-                // 嘗試從 dmesg 找 Kernel version
-                const kLine = lines.find(l => l.includes('Linux version'));
-                setText('dash-kernel', kLine ? kLine.split('version')[1].trim().split(' ')[0] : '-');
-                
-                // Preview
-                document.getElementById('dash-dmesg-preview').textContent = lines.slice(-20).join('\n');
-            } else {
-                document.getElementById('dash-dmesg-preview').textContent = "dmesg log not found (checked sos_commands/kernel/dmesg)";
-            }
+            const u = await findAndRead('uptime');
+            if(u.content) document.getElementById('dash-uptime').textContent = u.content.trim();
         }
 
-        async function renderHostInfo() {
-            // DMI
-            const dmi = await fetchContent('dmidecode');
-            if (dmi) {
-                setText('info-model', (dmi.match(/Product Name:\s*(.+)/) || [])[1] || '-');
-                setText('info-vendor', (dmi.match(/Manufacturer:\s*(.+)/) || [])[1] || '-');
-                setText('info-bios', (dmi.match(/Version:\s*(.+)/) || [])[1] || '-');
-            }
+        async function runHostInfo() {
+            // 1. Process List (The Smart Parsing Part)
+            const psRes = await findAndRead('ps');
+            showSrc('src-ps-dash', psRes.path);
+            showSrc('src-ps-mid', psRes.path);
 
-            // Sysctl / Tainted
-            const sysctl = await fetchContent('sysctl');
-            if (sysctl) {
-                const t = sysctl.match(/kernel.tainted\s*=\s*(\d+)/);
-                setText('info-tainted', t ? (t[1] == '0' ? '0 (Not Tainted)' : t[1] + ' (Tainted)') : '-');
+            if (psRes.content) {
+                const lines = psRes.content.split('\n');
                 
-                // Show key params
-                const keys = ['vm.swappiness', 'net.ipv4.ip_forward', 'fs.file-max'];
-                let html = '';
-                keys.forEach(k => {
-                    const m = sysctl.match(new RegExp(k.replace(/\./g, '\\.') + "\\s*=\\s*(.+)"));
-                    if(m) html += `<span class="me-3">${k}=${m[1]}</span>`;
-                });
-                document.getElementById('sysctl-box').innerHTML = html;
-            }
-
-            // SELinux
-            const se = await fetchContent('sestatus');
-            if (se) setText('info-selinux', (se.match(/Current mode:\s*(.+)/) || [])[1] || 'Unknown');
-
-            // Middleware (PS)
-            const ps = await fetchContent('ps');
-            if (ps) {
-                const lines = ps.split('\n');
-                // Dashboard Table
-                const procs = lines.slice(1).map(l => {
-                    const parts = l.trim().split(/\s+/);
-                    if (parts.length < 5) return null;
-                    return { pid: parts[1], user: parts[0], mem: parseFloat(parts[3]), cmd: parts.slice(10).join(' ') };
-                }).filter(x => x && !isNaN(x.mem)).sort((a,b) => b.mem - a.mem).slice(0,5);
-
-                const tbody = document.getElementById('mem-table-body');
-                tbody.innerHTML = procs.map(p => `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td class="text-truncate" style="max-width:150px">${p.cmd}</td></tr>`).join('');
-                
-                // Middleware Text
-                const mw = lines.filter(l => l.match(/java|httpd|nginx|mysql|postgres|docker|kube/i) && !l.includes(' grep '));
-                setText('info-middleware', mw.length ? mw.slice(0,20).join('\n') : "No common middleware found.");
-            }
-
-            // PCI
-            const pci = await fetchContent('lspci');
-            if(pci) {
-                 const interesting = pci.split('\n').filter(l => l.match(/RAID|Ethernet|Fibre|VGA/)).join('\n');
-                 setText('info-pci', interesting);
-            }
-        }
-
-        async function renderNetwork() {
-            const ip = await fetchContent('ip');
-            setText('net-ip', ip || 'Not found');
-            const ss = await fetchContent('ss');
-            setText('net-ss', ss || 'Not found');
-        }
-
-        // --- Log Tree ---
-        function buildLogTree() {
-            const tree = document.getElementById('log-tree');
-            tree.innerHTML = '';
-            
-            // Filters
-            const groups = {
-                "System": [/\/var\/log\/messages/, /dmesg/, /\/var\/log\/boot/],
-                "Security": [/\/var\/log\/secure/, /\/var\/log\/audit\/audit/],
-                "Package": [/\/var\/log\/dnf/, /\/var\/log\/yum/],
-                "Cron": [/\/var\/log\/cron/],
-                "Other": [/\/var\/log\//]
-            };
-
-            const found = { "System": [], "Security": [], "Package": [], "Cron": [], "Other": [] };
-
-            App.paths.forEach(p => {
-                // Basic filter for log-like files
-                if (!p.includes('var/log') && !p.includes('sos_commands/logs') && !p.includes('dmesg')) return;
-                if (p.endsWith('.gz') || p.endsWith('lastlog') || p.endsWith('wtmp')) return;
-
-                let added = false;
-                for (let g in groups) {
-                    if (g === 'Other') continue;
-                    if (groups[g].some(rx => rx.test(p))) {
-                        found[g].push(p);
-                        added = true;
+                // Smart Parse: Find the header line first
+                let headerIndex = -1;
+                for(let i=0; i<Math.min(20, lines.length); i++) {
+                    if (lines[i].includes('PID') && lines[i].includes('%MEM') && lines[i].includes('COMMAND')) {
+                        headerIndex = i;
                         break;
                     }
                 }
-                if (!added && p.includes('var/log')) found['Other'].push(p);
-            });
 
-            for (let g in found) {
-                if (!found[g].length) continue;
-                const title = document.createElement('div');
-                title.className = 'log-group';
-                title.textContent = g;
-                tree.appendChild(title);
+                if (headerIndex !== -1) {
+                    // Extract Data
+                    const dataLines = lines.slice(headerIndex + 1);
+                    const parsed = [];
+                    
+                    for (let line of dataLines) {
+                        const parts = line.trim().split(/\s+/);
+                        // 标准 ps aux: USER(0) PID(1) %CPU(2) %MEM(3) ... START(8) TIME(9) COMMAND(10...)
+                        // 需要防呆，確保欄位足夠
+                        if (parts.length < 10) continue;
+                        
+                        const mem = parseFloat(parts[3]);
+                        if (isNaN(mem)) continue;
+
+                        // Command 可能是剩餘所有部分的組合
+                        const cmd = parts.slice(10).join(' ');
+
+                        parsed.push({
+                            pid: parts[1],
+                            user: parts[0],
+                            mem: mem,
+                            cpu: parts[2],
+                            cmd: cmd
+                        });
+                    }
+
+                    // Sort by MEM
+                    const topMem = parsed.sort((a, b) => b.mem - a.mem).slice(0, 5);
+                    const tbody = document.getElementById('mem-table-body');
+                    tbody.innerHTML = topMem.map(p => 
+                        `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td>${p.cpu}%</td><td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td></tr>`
+                    ).join('');
+
+                    // Filter Middleware
+                    const mwRegex = /java|httpd|nginx|mysql|postgres|oracle|docker|kube|python|node/i;
+                    const mwList = parsed.filter(p => mwRegex.test(p.cmd) && !p.cmd.includes(' grep '));
+                    
+                    const mwBox = document.getElementById('info-middleware');
+                    if (mwList.length > 0) {
+                        mwBox.textContent = mwList.map(p => `${p.user} (${p.pid}): ${p.cmd}`).join('\n');
+                    } else {
+                        mwBox.textContent = "No common middleware processes found in ps output.";
+                    }
+
+                } else {
+                    document.getElementById('info-middleware').textContent = "Error: PS header not found in file.";
+                }
+            } else {
+                 document.getElementById('mem-table-body').innerHTML = '<tr><td colspan="5">PS log not found</td></tr>';
+            }
+
+            // 2. DMI
+            const dmi = await findAndRead('dmidecode');
+            showSrc('src-dmi', dmi.path);
+            if (dmi.content) {
+                const prod = (dmi.content.match(/Product Name:\s*(.+)/) || [])[1];
+                if(prod) document.getElementById('info-model').textContent = prod;
                 
-                found[g].sort().forEach(p => {
-                    const item = document.createElement('div');
-                    item.className = 'log-item';
-                    item.innerHTML = `${p.split('/').pop()} <span class="badge-path">${p}</span>`; // Show filename + small path
-                    item.onclick = () => showLog(p, item);
-                    tree.appendChild(item);
-                });
+                const vend = (dmi.content.match(/Manufacturer:\s*(.+)/) || [])[1];
+                if(vend) document.getElementById('info-vendor').textContent = vend;
+
+                const bios = (dmi.content.match(/Version:\s*(.+)/) || [])[1];
+                if(bios) document.getElementById('info-bios').textContent = bios;
             }
         }
 
-        async function showLog(path, el) {
-            document.querySelectorAll('.log-item').forEach(e => e.classList.remove('active'));
-            el.classList.add('active');
-            
-            const v = document.getElementById('log-viewer');
-            v.textContent = "Loading...";
-            
-            const file = App.files.get(path);
-            let text = await readFile(file);
-            
-            if (text.length > 500000) {
-                 text = "File too large, showing last 50KB...\n" + text.slice(-50000);
+        async function runNetwork() {
+            // SS (Listening Ports)
+            const ss = await findAndRead('ss');
+            showSrc('src-ss', ss.path);
+            if (ss.content) {
+                document.getElementById('net-ss').textContent = ss.content;
+            } else {
+                document.getElementById('net-ss').textContent = "File containing 'ss' and 'tulpn' not found.";
             }
-            v.textContent = text;
-            v.scrollTop = v.scrollHeight;
+
+            // IP
+            const ip = await findAndRead('ip');
+            showSrc('src-ip', ip.path);
+            if (ip.content) document.getElementById('net-ip').textContent = ip.content;
         }
 
-        // --- Utils ---
         function switchTab(id) {
             document.querySelectorAll('.content-view').forEach(e => e.classList.add('hidden'));
             document.getElementById('view-'+id).classList.remove('hidden');
             document.querySelectorAll('.nav-link').forEach(e => e.classList.remove('active'));
-            const nav = Array.from(document.querySelectorAll('.nav-link')).find(e => e.getAttribute('onclick').includes(id));
-            if(nav) nav.classList.add('active');
+            // Find nav link roughly
+            const navs = document.querySelectorAll('.nav-link');
+            for(let n of navs) {
+                if(n.getAttribute('onclick').includes(id)) n.classList.add('active');
+            }
         }
 
-        function setText(id, txt) {
-            const el = document.getElementById(id);
-            if (el) el.textContent = txt;
-        }
     </script>
 </body>
 </html>
