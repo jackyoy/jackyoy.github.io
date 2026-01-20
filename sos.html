@@ -3,46 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Report Analyzer (Light Mode)</title>
+    <title>RHEL SOS Analyzer v5 (Priority Search)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; }
-        
-        /* 區塊樣式優化 */
-        .card { border: none; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .card-header { background-color: #fff; border-bottom: 2px solid #f0f0f0; font-weight: 700; color: #2c3e50; }
-        
-        /* 上傳區塊優化 */
-        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 40px; text-align: center; background: #fff; cursor: pointer; transition: all 0.3s ease; }
-        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; transform: translateY(-2px); }
-        
-        /* 表格優化 */
-        .table thead th { background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; color: #555; font-size: 0.85rem; text-transform: uppercase; }
-        .table tbody td { vertical-align: middle; }
-        
-        /* Debug Console 優化 (保持深色以區分) */
-        .debug-console { background: #212529; color: #00ff00; font-family: 'Consolas', monospace; font-size: 0.85rem; padding: 15px; border-radius: 8px; height: 200px; overflow-y: auto; margin-top: 20px; }
-        .log-warn { color: #ffc107; } .log-err { color: #ff6b6b; } .log-info { color: #81d4fa; }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; color: #333; }
+        .card { border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .card-header { background-color: #fff; border-bottom: 2px solid #f0f0f0; font-weight: 700; color: #495057; }
+        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 40px; text-align: center; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; }
+        .debug-console { background: #212529; color: #00ff00; font-family: 'Consolas', monospace; font-size: 0.8rem; padding: 15px; border-radius: 8px; height: 250px; overflow-y: auto; margin-top: 20px; }
+        .log-warn { color: #ffc107; } .log-err { color: #ff6b6b; } .log-debug { color: #6c757d; }
     </style>
 </head>
 <body>
 
 <div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2 class="fw-bold text-primary mb-0">RHEL SOS Analyzer</h2>
-            <small class="text-muted">本機解析工具 v4.0 (Fix: PS Parsing & UI Contrast)</small>
-        </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重置</button>
+        <h2 class="fw-bold text-primary mb-0">RHEL SOS Analyzer v5</h2>
+        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">清除重置</button>
     </div>
 
     <div class="row justify-content-center" id="upload-section">
         <div class="col-md-8">
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
                 <div class="display-4 mb-3">📂</div>
-                <h4>點擊選擇 sosreport 資料夾</h4>
-                <p class="text-muted">支援 RHEL 7/8/9 格式 (資料僅在本機運算，不會上傳)</p>
+                <h4>選擇 sosreport 資料夾</h4>
+                <p class="text-muted">已優化搜尋邏輯，優先解析指令輸出檔</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
@@ -76,35 +63,24 @@
         <div class="row">
             <div class="col-lg-4 col-md-6">
                 <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>Memory Usage</span>
+                    <div class="card-header d-flex justify-content-between">
+                        <span>Memory</span>
                         <span id="mem-total-badge" class="badge bg-secondary">-- GB</span>
                     </div>
-                    <div class="card-body">
-                        <div style="height: 250px; position: relative;">
-                            <canvas id="memChart"></canvas>
-                        </div>
+                    <div class="card-body position-relative">
+                        <canvas id="memChart"></canvas>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6">
                 <div class="card h-100">
-                    <div class="card-header">Top Processes (CPU)</div>
+                    <div class="card-header">Top CPU Processes</div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>PID</th>
-                                        <th>User</th>
-                                        <th>CPU%</th>
-                                        <th>Command</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="ps-tbody">
-                                    <tr><td colspan="4" class="text-center text-muted py-3">等待解析...</td></tr>
-                                </tbody>
+                            <table class="table table-hover mb-0 small">
+                                <thead class="table-light"><tr><th>PID</th><th>User</th><th>CPU%</th><th>CMD</th></tr></thead>
+                                <tbody id="ps-tbody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -115,8 +91,7 @@
                 <div class="card h-100">
                     <div class="card-header">Network Interfaces</div>
                     <div class="card-body p-0">
-                        <div id="net-list" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;">
-                            </div>
+                        <div id="net-list" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;"></div>
                     </div>
                 </div>
             </div>
@@ -124,7 +99,7 @@
     </div>
 
     <div class="mt-4">
-        <h6 class="fw-bold text-secondary">系統日誌 (Debug Console)</h6>
+        <h6 class="fw-bold text-secondary">解析日誌 (Debug Log)</h6>
         <div class="debug-console" id="console"></div>
     </div>
 </div>
@@ -133,30 +108,29 @@
     let fileMap = new Map();
     let filePaths = [];
 
-    // --- Logging Helper ---
     function log(msg, type = 'info') {
         const c = document.getElementById('console');
         const d = document.createElement('div');
-        const time = new Date().toLocaleTimeString();
-        d.innerHTML = `<span style="opacity:0.6">[${time}]</span> ${msg}`;
+        d.innerHTML = `> ${msg}`;
         if (type === 'warn') d.className = 'log-warn';
         if (type === 'err') d.className = 'log-err';
+        if (type === 'debug') d.className = 'log-debug';
         c.appendChild(d);
         c.scrollTop = c.scrollHeight;
     }
 
-    // --- File Handling ---
     async function handleFiles(files) {
         if (files.length === 0) return;
-
-        // UI Reset
+        
+        // Reset
         document.getElementById('upload-section').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('console').innerHTML = '';
-        
-        log(`接收到 ${files.length} 個檔案，正在建立索引...`);
+        document.getElementById('ps-tbody').innerHTML = '';
+        document.getElementById('net-list').innerHTML = '';
 
-        // Indexing
+        log(`載入 ${files.length} 個檔案，建立索引...`);
+        
         fileMap.clear();
         filePaths = [];
         for (let i = 0; i < files.length; i++) {
@@ -164,48 +138,72 @@
             fileMap.set(path, files[i]);
             filePaths.push(path);
         }
-        log("索引建立完成。", "info");
 
-        // Execution
         try {
             await parseOS();
             await parseMemory();
-            await parseProcess(); // 重點修復
+            await parseProcess();
             await parseNetwork();
-            log("🎉 所有分析工作已完成。", "info");
+            log("🎉 解析完成", "info");
         } catch (e) {
-            log(`❌ 全域錯誤: ${e.message}`, "err");
+            log(`❌ 錯誤: ${e.message}`, "err");
             console.error(e);
         }
     }
 
-    // --- Universal Finder ---
-    function findFileAndRead(filenameKeywords) {
-        return new Promise((resolve) => {
-            const keywords = Array.isArray(filenameKeywords) ? filenameKeywords : [filenameKeywords];
-            let targetPath = null;
+    // --- 核心改進：優先級讀取器 ---
+    // 解決 proc 檔案 vs 指令輸出檔案的衝突
+    async function findAndReadPriority(keywords, checkContentFn = null) {
+        const kwList = Array.isArray(keywords) ? keywords : [keywords];
+        
+        // 策略 1: 優先尋找 sos_commands 下的檔案 (通常是指令輸出，解析較易)
+        let candidates = filePaths.filter(p => 
+            kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) 
+            && p.includes('sos_commands')
+        );
 
-            // 1. Endswith Match (精確)
-            for (const kw of keywords) {
-                targetPath = filePaths.find(p => p.endsWith(`/${kw}`));
-                if (targetPath) break;
-            }
-            // 2. Includes Match (寬鬆，排除 .xz)
-            if (!targetPath) {
-                for (const kw of keywords) {
-                    targetPath = filePaths.find(p => p.includes(kw) && !p.endsWith('.xz'));
-                    if (targetPath) break;
+        // 策略 2: 如果沒有，找所有符合結尾的檔案
+        if (candidates.length === 0) {
+            candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
+        }
+
+        // 策略 3: 模糊匹配 (包含關鍵字)
+        if (candidates.length === 0) {
+            candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
+        }
+
+        if (candidates.length === 0) {
+            log(`⚠️ 找不到關鍵字 [${kwList}] 相關檔案`, 'warn');
+            return null;
+        }
+
+        // 逐一嘗試讀取，直到內容符合 checkContentFn
+        for (const path of candidates) {
+            const file = fileMap.get(path);
+            const content = await readFileText(file);
+            
+            if (!content) continue;
+
+            // 如果有提供檢查函式 (例如：內容不能只是數字)
+            if (checkContentFn) {
+                if (checkContentFn(content)) {
+                    log(`✅ 讀取成功 (${kwList[0]}): ...${path.slice(-30)}`, 'debug');
+                    return content;
+                } else {
+                    log(`⚠️ 跳過檔案 (內容不符預期): ...${path.slice(-30)}`, 'debug');
                 }
+            } else {
+                log(`✅ 讀取成功 (${kwList[0]}): ...${path.slice(-30)}`, 'debug');
+                return content;
             }
+        }
+        
+        log(`❌ 找到檔案但內容皆不符預期 [${kwList}]`, 'err');
+        return null;
+    }
 
-            if (!targetPath) {
-                log(`⚠️ 找不到檔案關鍵字: [${keywords.join(', ')}]`, "warn");
-                resolve(null);
-                return;
-            }
-
-            log(`讀取檔案: ...${targetPath.slice(-40)}`); // 只顯示路徑後段
-            const file = fileMap.get(targetPath);
+    function readFileText(file) {
+        return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
             reader.onerror = () => resolve(null);
@@ -213,81 +211,99 @@
         });
     }
 
-    // --- Parsers ---
+    // --- 解析器 ---
 
     async function parseOS() {
-        const hostname = await findFileAndRead('hostname');
+        // Hostname
+        const hostname = await findAndReadPriority('hostname');
         if (hostname) document.getElementById('os-hostname').textContent = hostname.trim();
 
-        const release = await findFileAndRead(['os-release', 'redhat-release']);
+        // Release
+        const release = await findAndRead(['redhat-release', 'os-release']);
         if (release) {
             const m = release.match(/PRETTY_NAME="([^"]+)"/);
             document.getElementById('os-release').textContent = m ? m[1] : release.split('\n')[0];
         }
 
-        const uname = await findFileAndRead('uname');
+        // Kernel
+        const uname = await findAndRead('uname');
         if (uname) {
-            const p = uname.split(' ');
-            if (p.length > 2) document.getElementById('os-kernel').textContent = p[2];
+            const parts = uname.split(' ');
+            if (parts.length > 2) document.getElementById('os-kernel').textContent = parts[2];
         }
 
-        const uptime = await findFileAndRead('uptime');
+        // Uptime (重要修正：過濾 /proc/uptime)
+        // /proc/uptime 內容通常是 "12345.67 12345.67" (純數字)
+        // uptime 指令內容通常是 " 14:22:01 up 10 days..."
+        const uptime = await findAndRead('uptime', (content) => {
+            return content.includes('up') && content.includes(':'); // 必須包含 up 和時間冒號
+        });
+        
         if (uptime) {
-             const m = uptime.match(/up\s+([^,]+)/);
-             if (m) document.getElementById('os-uptime').textContent = m[1];
+            const m = uptime.match(/up\s+([^,]+)/);
+            if (m) document.getElementById('os-uptime').textContent = m[1];
+        } else {
+            document.getElementById('os-uptime').textContent = "Format Error";
         }
     }
 
     async function parseMemory() {
-        const data = await findFileAndRead('meminfo');
+        const data = await findAndRead('meminfo');
         if (!data) return;
 
-        const getVal = (k) => {
-            const m = data.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm'));
-            return m ? parseInt(m[1]) : 0;
-        };
-
-        const total = getVal('MemTotal');
-        const free = getVal('MemFree');
-        const buffers = getVal('Buffers');
-        const cached = getVal('Cached');
-        const slab = getVal('Slab');
+        const val = (k) => { const m = data.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm')); return m ? parseInt(m[1]) : 0; };
+        const total = val('MemTotal'), free = val('MemFree'), buff = val('Buffers'), cached = val('Cached'), slab = val('Slab');
+        const used = total - free - buff - cached - slab;
         
-        // 簡單計算
-        const used = total - free - buffers - cached - slab;
-        const totalGB = (total/1024/1024).toFixed(1);
+        document.getElementById('mem-total-badge').textContent = (total/1024/1024).toFixed(1) + " GB";
 
-        document.getElementById('mem-total-badge').textContent = `${totalGB} GB`;
-
-        const ctx = document.getElementById('memChart').getContext('2d');
-        if (window.memChartInstance) window.memChartInstance.destroy();
-
-        window.memChartInstance = new Chart(ctx, {
+        new Chart(document.getElementById('memChart'), {
             type: 'doughnut',
             data: {
-                labels: ['App Used', 'Buffer/Cache', 'Free'],
-                datasets: [{
-                    data: [used, buffers+cached+slab, free],
-                    backgroundColor: ['#dc3545', '#ffc107', '#198754'],
-                    borderWidth: 1,
-                    borderColor: '#fff'
+                labels: ['Used', 'Buff/Cache', 'Free'],
+                datasets: [{ 
+                    data: [used, buff+cached+slab, free], 
+                    backgroundColor: ['#dc3545', '#ffc107', '#198754'] 
                 }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } }
-            }
+            options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
         });
     }
 
-    // 重点修復：Process Parser
-    async function parseProcess() {
-        // 加入 ps_auxwwwm (常見於 RHEL sosreport), ps_auxww, ps_aux, 以及單純 ps
-        const data = await findFileAndRead(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps']);
-        const tbody = document.getElementById('ps-tbody');
-        tbody.innerHTML = '';
+    async function parseNetwork() {
+        // 擴充關鍵字，並嘗試抓取指令輸出
+        const data = await findAndRead(['ip_address', 'ip_-d_address', 'ip_addr'], (content) => {
+            return content.includes('state') || content.includes('mtu'); // 確保是 ip addr 輸出
+        });
+        
+        const list = document.getElementById('net-list');
+        list.innerHTML = '';
+        
+        if (!data) {
+            list.innerHTML = '<div class="p-3 text-muted text-center">查無 Network 資料</div>';
+            return;
+        }
 
+        // Regex 解析
+        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
+        let match;
+        while ((match = regex.exec(data)) !== null) {
+            const name = match[1];
+            const state = match[2];
+            const isUp = state === 'UP';
+            list.innerHTML += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">${name}</span>
+                    <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${state}</span>
+                </div>`;
+        }
+    }
+
+    async function parseProcess() {
+        // 尋找 PS
+        const data = await findAndRead(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], (content) => content.includes('PID'));
+        const tbody = document.getElementById('ps-tbody');
+        
         if (!data) {
             tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">無 PS 資料</td></tr>';
             return;
@@ -295,110 +311,46 @@
 
         const lines = data.split('\n');
         let procs = [];
-        let headersFound = false;
-        let cpuIdx = -1, memIdx = -1, userIdx = -1, pidIdx = -1, cmdIdx = -1;
-
-        // 1. 動態尋找 Header 行 (因為 ps 輸出有時會包含註解)
-        // Header 通常包含 "USER" "PID" "%CPU"
-        for (let i = 0; i < Math.min(lines.length, 20); i++) {
-            const line = lines[i].trim();
-            if (line.includes('USER') && line.includes('PID')) {
-                const parts = line.split(/\s+/);
-                userIdx = parts.indexOf('USER');
-                pidIdx = parts.indexOf('PID');
-                // 有些版本是 %CPU, 有些是 CPU
-                cpuIdx = parts.findIndex(p => p.includes('CPU')); 
-                memIdx = parts.findIndex(p => p.includes('MEM'));
-                cmdIdx = parts.indexOf('COMMAND'); // 或者是 CMD
-                if (cmdIdx === -1) cmdIdx = parts.indexOf('CMD');
-                
-                // 如果找不到明確的 COMMAND 欄位，通常假設是最後一欄 (通常是第 10 或 11 欄)
-                if (cmdIdx === -1) cmdIdx = 10; 
-
-                headersFound = true;
-                log(`找到 PS Header 於第 ${i+1} 行: CPU在欄位 ${cpuIdx}`, 'info');
+        let map = { user:0, pid:1, cpu:2, cmd:10 }; // default
+        
+        // Header detection
+        for(let line of lines.slice(0,20)) {
+            if(line.includes('PID') && line.includes('CPU')) {
+                const parts = line.trim().split(/\s+/);
+                map.user = parts.indexOf('USER');
+                map.pid = parts.indexOf('PID');
+                map.cpu = parts.findIndex(c => c.includes('CPU'));
+                map.cmd = parts.indexOf('COMMAND');
+                if(map.cmd === -1) map.cmd = parts.indexOf('CMD');
+                if(map.cmd === -1) map.cmd = 10;
                 break;
             }
         }
 
-        // 如果沒找到 Header，使用預設值 (標準 ps aux)
-        if (!headersFound) {
-            log("未找到 PS Header，使用預設欄位索引", 'warn');
-            userIdx = 0; pidIdx = 1; cpuIdx = 2; memIdx = 3; cmdIdx = 10;
-        }
-
-        // 2. 解析資料
-        for (let i = 0; i < lines.length; i++) {
+        for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line || line.includes('USER') && line.includes('PID')) continue;
-
-            const parts = line.split(/\s+/);
-            // 確保有足夠的欄位
-            if (parts.length < 10) continue;
-
-            // 處理 Command 可能被 split 切開的問題
-            const cmdParts = parts.slice(cmdIdx);
-            const cmdFull = cmdParts.join(' ');
+            if (!line || line.includes('PID')) continue;
+            const p = line.split(/\s+/);
+            if (p.length < 10) continue;
 
             procs.push({
-                user: parts[userIdx],
-                pid: parts[pidIdx],
-                cpu: parseFloat(parts[cpuIdx]) || 0,
-                cmd: cmdFull
+                user: p[map.user],
+                pid: p[map.pid],
+                cpu: parseFloat(p[map.cpu]) || 0,
+                cmd: p.slice(map.cmd).join(' ')
             });
         }
 
-        if (procs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">無法解析 PS 內容格式</td></tr>';
-            return;
-        }
-
-        // 3. 排序與顯示
-        procs.sort((a, b) => b.cpu - a.cpu);
-        
-        // 顯示前 5 名
-        procs.slice(0, 5).forEach(p => {
-            // 對 command 進行截斷處理，避免太長
-            const shortCmd = p.cmd.length > 50 ? p.cmd.substring(0, 50) + '...' : p.cmd;
-            const row = `
+        procs.sort((a,b) => b.cpu - a.cpu).slice(0, 5).forEach(p => {
+            tbody.innerHTML += `
                 <tr>
-                    <td><span class="badge bg-light text-dark border">${p.pid}</span></td>
+                    <td>${p.pid}</td>
                     <td>${p.user}</td>
                     <td class="fw-bold text-danger">${p.cpu}%</td>
-                    <td title="${p.cmd}"><small class="text-muted">${shortCmd}</small></td>
-                </tr>
-            `;
-            tbody.innerHTML += row;
+                    <td class="text-truncate" style="max-width: 150px;" title="${p.cmd}">${p.cmd}</td>
+                </tr>`;
         });
-        
-        log(`成功解析 ${procs.length} 個行程，顯示 Top 5。`, 'info');
     }
-
-    async function parseNetwork() {
-        const data = await findFileAndRead(['ip_address', 'ip_addr', 'ip_-d_address']);
-        const list = document.getElementById('net-list');
-        list.innerHTML = '';
-
-        if (!data) {
-            list.innerHTML = '<div class="p-3 text-muted text-center">無網路資料</div>';
-            return;
-        }
-
-        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
-        let match;
-        while ((match = regex.exec(data)) !== null) {
-            const name = match[1];
-            const state = match[2];
-            const isUp = state === 'UP';
-            
-            list.innerHTML += `
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span class="fw-bold text-dark">${name}</span>
-                    <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${state}</span>
-                </div>`;
-        }
-    }
-
 </script>
 </body>
 </html>
