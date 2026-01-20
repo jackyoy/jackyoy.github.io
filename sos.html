@@ -3,393 +3,281 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SOS Report Analyzer (Frontend)</title>
+    <title>SOS Report Analyzer (Debug Version)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --primary-bg: #f8f9fa; --card-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        body { background-color: var(--primary-bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .upload-area { border: 2px dashed #ced4da; border-radius: 10px; padding: 40px; text-align: center; background: white; transition: 0.3s; cursor: pointer; }
+        :root { --primary-bg: #f8f9fa; }
+        body { background-color: var(--primary-bg); font-family: 'Segoe UI', monospace; }
+        .upload-area { border: 2px dashed #6c757d; border-radius: 10px; padding: 30px; text-align: center; background: white; cursor: pointer; }
         .upload-area:hover { border-color: #0d6efd; background-color: #f1f8ff; }
-        .card { border: none; shadow: var(--card-shadow); margin-bottom: 20px; }
-        .card-header { background: white; border-bottom: 1px solid #eee; font-weight: 600; color: #495057; }
-        .metric-value { font-size: 1.5rem; font-weight: bold; color: #2c3e50; }
-        .metric-label { font-size: 0.875rem; color: #6c757d; }
-        #loading { display: none; }
+        .debug-console { background: #212529; color: #00ff00; font-family: 'Consolas', monospace; font-size: 0.85rem; padding: 15px; border-radius: 5px; max-height: 300px; overflow-y: auto; margin-top: 20px; }
+        .log-warn { color: #ffc107; }
+        .log-err { color: #ff6b6b; }
+        .log-info { color: #81d4fa; }
     </style>
 </head>
 <body>
 
-<div class="container py-5">
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <h2 class="fw-bold">SOS Report Analyzer</h2>
-            <p class="text-muted">純前端解析 RHEL 系統日誌</p>
-        </div>
-    </div>
+<div class="container py-4">
+    <h3 class="fw-bold text-center mb-4">SOS Report Analyzer <span class="badge bg-warning text-dark">Debug Mode</span></h3>
 
-    <div class="row justify-content-center mb-5">
+    <div class="row justify-content-center mb-4">
         <div class="col-md-8">
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
-                <div class="mb-3">📂</div>
-                <h5>點擊選擇 sosreport 解壓後的資料夾</h5>
-                <p class="text-muted small">支援 webkitdirectory (請選擇解壓後的根目錄)</p>
+                <h4>📂 點擊選擇資料夾</h4>
+                <p class="text-muted mb-0">請選擇解壓縮後的 sosreport 資料夾</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
     </div>
 
-    <div id="loading" class="text-center mb-4">
-        <div class="spinner-border text-primary" role="status"></div>
-        <div class="mt-2">正在分析檔案結構與內容...</div>
-    </div>
-
     <div id="dashboard" style="display: none;">
-        
-        <div class="row mb-3">
-            <div class="col-12">
-                <div class="card p-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h4 id="os-hostname" class="mb-1">Unknown Host</h4>
-                            <span id="os-release" class="badge bg-primary">Linux</span>
-                            <span id="os-kernel" class="badge bg-secondary">Kernel</span>
-                        </div>
-                        <div class="text-end">
-                            <div class="metric-label">Uptime</div>
-                            <div id="os-uptime" class="fw-bold">--</div>
-                        </div>
-                    </div>
+        <div class="card mb-3">
+            <div class="card-body d-flex justify-content-between">
+                <div>
+                    <h5 id="os-hostname" class="mb-0">Hostname: --</h5>
+                    <small id="os-release" class="text-muted">OS: --</small>
+                </div>
+                <div class="text-end">
+                    <h5 id="os-uptime" class="mb-0">Uptime: --</h5>
+                    <small id="os-kernel" class="text-muted">Kernel: --</small>
                 </div>
             </div>
         </div>
 
-        <div class="row">
+        <div class="row g-3">
             <div class="col-md-4">
                 <div class="card h-100">
-                    <div class="card-header">CPU Information</div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <div class="metric-label">Model</div>
-                            <div id="cpu-model" class="fw-bold small">Detecting...</div>
-                        </div>
-                        <div class="row text-center">
-                            <div class="col-6">
-                                <div id="cpu-physical" class="metric-value">0</div>
-                                <div class="metric-label">Physical</div>
-                            </div>
-                            <div class="col-6">
-                                <div id="cpu-logical" class="metric-value">0</div>
-                                <div class="metric-label">Logical</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-header">Memory Usage</div>
+                    <div class="card-header">Memory</div>
                     <div class="card-body">
                         <canvas id="memChart"></canvas>
-                        <div class="mt-3 text-center small">
-                            Total: <span id="mem-total" class="fw-bold">0 GB</span>
-                        </div>
+                        <div class="text-center mt-2 fw-bold" id="mem-total">--</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-md-4">
                 <div class="card h-100">
-                    <div class="card-header">Network Interfaces</div>
+                    <div class="card-header">CPU</div>
+                    <div class="card-body">
+                        <p>Model: <span id="cpu-model" class="fw-bold">--</span></p>
+                        <p>Logical Cores: <span id="cpu-logical" class="fw-bold">--</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">Network</div>
                     <div class="card-body p-0">
-                        <div class="list-group list-group-flush" id="net-list" style="max-height: 250px; overflow-y: auto;">
-                            </div>
+                        <div id="net-list" class="list-group list-group-flush" style="max-height: 200px; overflow-y: auto;"></div>
                     </div>
                 </div>
             </div>
         </div>
-        
-        <div class="row mt-3">
-             <div class="col-12">
-                <div class="card">
-                    <div class="card-header">Process & Load (Top Consumers)</div>
-                    <div class="card-body">
-                         <p class="text-muted small">模擬 xsos 的 PSCHECK 功能 (需確保 sosreport 包含 ps aux 輸出)</p>
-                         <table class="table table-sm table-hover" id="ps-table">
-                             <thead>
-                                 <tr><th>User</th><th>PID</th><th>%CPU</th><th>%MEM</th><th>Command</th></tr>
-                             </thead>
-                             <tbody></tbody>
-                         </table>
-                    </div>
-                </div>
-             </div>
-        </div>
+    </div>
 
+    <div class="debug-console" id="console">
+        <div>> 等待檔案上傳...</div>
     </div>
 </div>
 
 <script>
-    // --- 核心邏輯區 ---
+    let fileIndex = []; // 存儲所有檔案路徑的陣列
+    let fileObjects = {}; // 路徑對應檔案物件的 Map
 
-    // 模擬的檔案系統映射 { 'proc/meminfo': FileObject, ... }
-    let fileMap = {};
+    function log(msg, type = 'info') {
+        const consoleDiv = document.getElementById('console');
+        const line = document.createElement('div');
+        line.textContent = `> ${msg}`;
+        if (type === 'warn') line.className = 'log-warn';
+        if (type === 'error') line.className = 'log-err';
+        consoleDiv.appendChild(line);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    }
 
     async function handleFiles(files) {
         if (files.length === 0) return;
-
-        document.getElementById('loading').style.display = 'block';
+        
+        document.getElementById('console').innerHTML = ''; // Clear log
         document.getElementById('dashboard').style.display = 'none';
-        fileMap = {};
+        
+        log(`接收到 ${files.length} 個檔案物件，開始建立索引...`);
 
-        // 1. 建立檔案索引 (Virtual File System)
-        // sosreport 通常結構為: sosreport-hostname-date/proc/meminfo
-        // 我們需要忽略最外層的資料夾名稱，建立相對路徑索引
+        fileIndex = [];
+        fileObjects = {};
+
+        // 1. 建立索引與正規化
         Array.from(files).forEach(file => {
-            // 移除第一層目錄名稱，正規化路徑
-            const relativePath = file.webkitRelativePath.split('/').slice(1).join('/');
-            fileMap[relativePath] = file;
+            // webkitRelativePath 例如: "sosreport-server-20231001/proc/meminfo"
+            const path = file.webkitRelativePath;
+            fileIndex.push(path);
+            fileObjects[path] = file;
         });
 
-        console.log(`Indexed ${Object.keys(fileMap).length} files.`);
+        // 2. 偵測根目錄偏移量
+        // sosreport 的特徵是會有 proc/meminfo 或 proc/version
+        // 我們尋找這個檔案，並以此判斷 "root" 前綴是什麼
+        const anchorFile = fileIndex.find(p => p.endsWith('/proc/meminfo') || p.endsWith('/proc/version'));
+        
+        if (!anchorFile) {
+            log("❌ 嚴重錯誤：找不到關鍵系統路徑 (如 proc/meminfo)。請確認您是否上傳了正確的資料夾。", "error");
+            log("偵測到的前 5 個檔案路徑範例：", "warn");
+            fileIndex.slice(0, 5).forEach(f => log(" - " + f, "warn"));
+            return;
+        }
 
+        // 計算 Root Prefix (例如 "Downloads/sosreport-X/")
+        // 如果 anchorFile 是 "folder/proc/meminfo"，prefix 就是 "folder/"
+        const splitKey = anchorFile.includes('/proc/meminfo') ? '/proc/meminfo' : '/proc/version';
+        const rootPrefix = anchorFile.split(splitKey)[0] + '/';
+        
+        log(`✅ 偵測到資料夾結構根目錄: "${rootPrefix}"`);
+        
+        // 3. 開始解析
         try {
-            // 2. 執行各個解析模組 (非同步讀取)
-            await Promise.all([
-                parseOS(),
-                parseCPU(),
-                parseMemory(),
-                parseNetwork(),
-                parseProcess()
-            ]);
-            
-            // 3. 顯示儀表板
+            await parseOS(rootPrefix);
+            await parseMemory(rootPrefix);
+            await parseCPU(rootPrefix);
+            await parseNetwork(rootPrefix);
             document.getElementById('dashboard').style.display = 'block';
+            log("🎉 解析完成！");
         } catch (e) {
+            log(`解析過程發生未預期的錯誤: ${e.message}`, "error");
             console.error(e);
-            alert("解析失敗，請確認是否上傳了正確的 sosreport 資料夾。");
-        } finally {
-            document.getElementById('loading').style.display = 'none';
         }
     }
 
-    // 輔助：讀取檔案內容為文字
-    function readFile(path) {
-        return new Promise((resolve, reject) => {
-            // 模糊搜尋：因為有些 sosreport 會放在 sos_commands/ 下，有些在 proc/ 下
-            // 這裡做一個簡單的優先順序搜尋
-            let targetFile = fileMap[path];
-            
-            // 如果直接路徑找不到，嘗試搜尋特定關鍵字 (模擬 xsos 的搜尋邏輯)
-            if (!targetFile) {
-                const keys = Object.keys(fileMap);
-                const foundKey = keys.find(k => k.endsWith(path));
-                if (foundKey) targetFile = fileMap[foundKey];
+    // 核心讀取函式：支援模糊搜尋
+    function readFile(rootPrefix, relativePath) {
+        return new Promise((resolve) => {
+            // 策略 1: 嘗試標準路徑 (Root + Relative)
+            let targetPath = rootPrefix + relativePath;
+            let file = fileObjects[targetPath];
+
+            // 策略 2: 如果找不到，嘗試搜尋 sos_commands 下的路徑 (因為有時候 ps 在根目錄，有時在 sos_commands)
+            if (!file) {
+                 // 嘗試模糊匹配：找出結尾符合 relativePath 的檔案
+                 // 這可以解決 sos_commands 路徑變異的問題
+                 const foundPath = fileIndex.find(p => p.startsWith(rootPrefix) && p.endsWith(relativePath));
+                 if (foundPath) {
+                     file = fileObjects[foundPath];
+                     // log(`🔍 模糊匹配成功: 請求 ${relativePath} -> 找到 ${foundPath}`, "warn");
+                 }
             }
 
-            if (!targetFile) {
-                console.warn(`File not found: ${path}`);
-                resolve(null); // 不拋出錯誤，讓其他部分繼續執行
+            if (!file) {
+                log(`⚠️ 找不到檔案: ${relativePath}`, "warn");
+                resolve(null);
                 return;
             }
 
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = (e) => reject(e);
-            reader.readAsText(targetFile);
+            reader.onerror = () => {
+                log(`❌ 讀取失敗: ${relativePath}`, "error");
+                resolve(null);
+            };
+            reader.readAsText(file);
         });
     }
 
-    // --- 解析模組 (模擬 xsos 邏輯) ---
+    // --- 解析邏輯 ---
 
-    // 1. OS Info
-    async function parseOS() {
-        const hostnameData = await readFile('hostname');
-        const releaseData = await readFile('etc/redhat-release') || await readFile('etc/os-release');
-        const uptimeData = await readFile('uptime');
-        const unameData = await readFile('uname');
+    async function parseOS(prefix) {
+        log("正在分析作業系統資訊...");
+        const hostname = await readFile(prefix, 'hostname');
+        if (hostname) document.getElementById('os-hostname').textContent = `Hostname: ${hostname.trim()}`;
 
-        if (hostnameData) document.getElementById('os-hostname').textContent = hostnameData.trim();
-        
-        if (releaseData) {
-            // 簡單處理，如果是 os-release 找 PRETTY_NAME
-            let release = releaseData.trim();
-            const prettyMatch = releaseData.match(/PRETTY_NAME="([^"]+)"/);
-            if (prettyMatch) release = prettyMatch[1];
-            document.getElementById('os-release').textContent = release;
+        const release = await readFile(prefix, 'etc/redhat-release') || await readFile(prefix, 'etc/os-release');
+        if (release) {
+            // 取第一行或 PRETTY_NAME
+            const line = release.split('\n')[0].replace(/"/g, '');
+            document.getElementById('os-release').textContent = `OS: ${line}`;
         }
 
-        if (unameData) {
-             // 通常 uname 輸出: Linux hostname 3.10.0... x86_64
-             const parts = unameData.split(' ');
-             if (parts.length >= 3) document.getElementById('os-kernel').textContent = parts[2];
-        }
-
-        if (uptimeData) {
-            // 簡單提取 up 時間
-            const match = uptimeData.match(/up\s+([^,]+),/);
-            if (match) document.getElementById('os-uptime').textContent = match[1];
+        const uptime = await readFile(prefix, 'uptime');
+        if (uptime) {
+             const upMatch = uptime.match(/up\s+([^,]+)/);
+             if (upMatch) document.getElementById('os-uptime').textContent = `Uptime: ${upMatch[1]}`;
         }
     }
 
-    // 2. CPU Info (/proc/cpuinfo)
-    async function parseCPU() {
-        const data = await readFile('proc/cpuinfo');
+    async function parseMemory(prefix) {
+        log("正在分析記憶體...");
+        const data = await readFile(prefix, 'proc/meminfo');
         if (!data) return;
 
-        // Model name
-        const modelMatch = data.match(/model name\s+:\s+(.+)/);
-        if (modelMatch) document.getElementById('cpu-model').textContent = modelMatch[1];
-
-        // Logical Count
-        const logical = (data.match(/processor\s+:/g) || []).length;
-        document.getElementById('cpu-logical').textContent = logical;
-
-        // Physical Count (physical id)
-        const physicalIds = new Set();
-        const lines = data.split('\n');
-        lines.forEach(line => {
-            const match = line.match(/physical id\s+:\s+(\d+)/);
-            if (match) physicalIds.add(match[1]);
-        });
-        // 若找不到 physical id (如 VM)，通常視為 1 或與 logical 相同，這裡顯示 set size
-        document.getElementById('cpu-physical').textContent = physicalIds.size || 1;
-    }
-
-    // 3. Memory Info (/proc/meminfo)
-    async function parseMemory() {
-        const data = await readFile('proc/meminfo');
-        if (!data) return;
-
-        const parseVal = (key) => {
-            const regex = new RegExp(`^${key}:\\s+(\\d+)`, 'm');
-            const match = data.match(regex);
-            return match ? parseInt(match[1], 10) : 0; // unit usually kB
+        const getVal = (k) => {
+            const m = data.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm'));
+            return m ? parseInt(m[1]) : 0;
         };
 
-        const total = parseVal('MemTotal');
-        const free = parseVal('MemFree');
-        const buffers = parseVal('Buffers');
-        const cached = parseVal('Cached');
-        const slab = parseVal('Slab');
-        
-        // xsos logic: Used = Total - Free
-        // xsos logic: UsedNoBC = Used - Buffers - Cached ( - Slab usually considered used but actionable)
-        // 為了圖表簡單，我們計算：Used (App), Buffers/Cache, Free
-        
+        const total = getVal('MemTotal');
+        const free = getVal('MemFree');
+        const buffers = getVal('Buffers');
+        const cached = getVal('Cached');
+        const slab = getVal('Slab');
         const used = total - free - buffers - cached - slab;
-        const buffCache = buffers + cached + slab;
 
-        document.getElementById('mem-total').textContent = (total / 1024 / 1024).toFixed(2) + ' GB';
+        document.getElementById('mem-total').textContent = `${(total/1024/1024).toFixed(2)} GB Total`;
 
-        // Render Chart
         const ctx = document.getElementById('memChart').getContext('2d');
-        if (window.myMemChart) window.myMemChart.destroy(); // Redraw safety
-
-        window.myMemChart = new Chart(ctx, {
+        if (window.myChart) window.myChart.destroy();
+        window.myChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: ['App Used', 'Buff/Cache', 'Free'],
                 datasets: [{
-                    data: [used, buffCache, free],
-                    backgroundColor: ['#dc3545', '#ffc107', '#198754'],
-                    borderWidth: 0
+                    data: [used, buffers+cached+slab, free],
+                    backgroundColor: ['#dc3545', '#ffc107', '#198754']
                 }]
             },
-            options: {
-                responsive: true,
-                plugins: { legend: { position: 'bottom' } }
-            }
+            options: { plugins: { legend: { position: 'right' } } }
         });
     }
 
-    // 4. Network Interfaces (ip addr)
-    async function parseNetwork() {
-        // 嘗試讀取 ip address 輸出
-        const data = await readFile('sos_commands/networking/ip_address') || await readFile('ip_addr');
-        const container = document.getElementById('net-list');
-        container.innerHTML = '';
+    async function parseCPU(prefix) {
+        log("正在分析 CPU...");
+        const data = await readFile(prefix, 'proc/cpuinfo');
+        if (!data) return;
 
-        if (!data) {
-            container.innerHTML = '<div class="list-group-item">No network data found</div>';
-            return;
-        }
+        const model = data.match(/model name\s+:\s+(.+)/);
+        if (model) document.getElementById('cpu-model').textContent = model[1];
 
-        // 簡單解析：尋找數字開頭的介面區塊
-        // 1: lo: <LOOPBACK...>
-        const lines = data.split('\n');
-        lines.forEach(line => {
-            // Regex: 1: eth0: <BROADCAST...>
-            const match = line.match(/^\d+:\s+([^:]+):.*state\s+(\w+)/);
-            if (match) {
-                const iface = match[1];
-                const state = match[2]; // UP or DOWN
-                
-                const item = document.createElement('div');
-                item.className = 'list-group-item d-flex justify-content-between align-items-center';
-                
-                const badgeClass = (state === 'UP') ? 'bg-success' : 'bg-danger';
-                
-                item.innerHTML = `
-                    <span>${iface}</span>
-                    <span class="badge ${badgeClass}">${state}</span>
-                `;
-                container.appendChild(item);
-            }
-        });
+        const count = (data.match(/processor\s+:/g) || []).length;
+        document.getElementById('cpu-logical').textContent = count;
     }
 
-    // 5. Process Check (ps aux)
-    async function parseProcess() {
-        // 尋找 ps aux 輸出
-        let data = await readFile('ps'); // 常見於 sosreport 根目錄
-        if (!data) data = await readFile('sos_commands/process/ps_aux'); // 或在子目錄
-
-        const tbody = document.querySelector('#ps-table tbody');
-        tbody.innerHTML = '';
-
-        if (!data) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center">Ps output not found</td></tr>';
-            return;
-        }
-
-        const lines = data.split('\n');
-        // 移除 header
-        const processes = [];
+    async function parseNetwork(prefix) {
+        log("正在分析網路介面...");
+        // 嘗試多種可能的 IP 指令輸出路徑
+        let data = await readFile(prefix, 'sos_commands/networking/ip_address');
+        if (!data) data = await readFile(prefix, 'ip_addr'); // 舊版相容
         
-        // 解析每一行
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            // ps aux columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-            // 使用空白分割，但在 COMMAND 部分要合併
-            const parts = line.split(/\s+/);
-            if (parts.length < 11) continue;
+        const list = document.getElementById('net-list');
+        list.innerHTML = '';
 
-            processes.push({
-                user: parts[0],
-                pid: parts[1],
-                cpu: parseFloat(parts[2]),
-                mem: parseFloat(parts[3]),
-                cmd: parts.slice(10).join(' ') // 合併 command 及其參數
-            });
+        if (!data) {
+            list.innerHTML = '<div class="list-group-item text-muted">無網路資料</div>';
+            return;
         }
 
-        // 排序：依據 CPU 使用率 (Desc)
-        processes.sort((a, b) => b.cpu - a.cpu);
-
-        // 取前 5 名
-        processes.slice(0, 5).forEach(p => {
-            const row = `<tr>
-                <td>${p.user}</td>
-                <td>${p.pid}</td>
-                <td class="text-danger fw-bold">${p.cpu}%</td>
-                <td>${p.mem}%</td>
-                <td class="text-truncate" style="max-width: 200px;" title="${p.cmd}">${p.cmd}</td>
-            </tr>`;
-            tbody.insertAdjacentHTML('beforeend', row);
-        });
+        // 簡單 Regex 解析 ip addr 輸出
+        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
+        let match;
+        let found = 0;
+        while ((match = regex.exec(data)) !== null) {
+            found++;
+            const name = match[1];
+            const state = match[2];
+            const color = state === 'UP' ? 'bg-success' : 'bg-secondary';
+            list.innerHTML += `
+                <div class="list-group-item d-flex justify-content-between align-items-center p-2">
+                    <span>${name}</span>
+                    <span class="badge ${color}">${state}</span>
+                </div>`;
+        }
+        log(`找到 ${found} 個網路介面`);
     }
 
 </script>
