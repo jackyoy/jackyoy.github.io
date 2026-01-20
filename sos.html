@@ -3,26 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v9 (Final Fix)</title>
+    <title>RHEL SOS Analyzer v10 (Complete)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         :root { --sidebar-width: 260px; --bg-dark: #1e1e2f; }
         body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, sans-serif; height: 100vh; overflow: hidden; display: flex; }
         
+        /* Sidebar */
         .sidebar { width: var(--sidebar-width); background: var(--bg-dark); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
         .nav-link { color: rgba(255,255,255,0.7); padding: 12px 20px; cursor: pointer; border-left: 3px solid transparent; }
         .nav-link:hover, .nav-link.active { color: #fff; background: rgba(255,255,255,0.1); border-left-color: #0d6efd; }
         
+        /* Main */
         .main-content { flex: 1; overflow-y: auto; padding: 25px; }
+        
+        /* Cards & Boxes */
         .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
         .card-header { font-weight: 600; background: #fff; border-bottom: 1px solid #eee; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
         .source-badge { font-size: 0.75rem; color: #fff; background-color: #6c757d; padding: 2px 8px; border-radius: 4px; font-weight: normal; font-family: monospace; }
-        
         .console-box { background: #2d2d3b; color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
         
+        /* Upload */
         .upload-wrapper { height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .upload-box { border: 2px dashed #ccc; padding: 40px; border-radius: 12px; background: #fff; text-align: center; cursor: pointer; width: 500px; }
+        
+        /* Log Explorer Layout */
+        .log-container { display: flex; height: calc(100vh - 120px); gap: 15px; border: 1px solid #ddd; background: #fff; border-radius: 8px; overflow: hidden; }
+        .log-tree { width: 30%; background: #f8f9fa; border-right: 1px solid #ddd; overflow-y: auto; font-size: 0.9rem; }
+        .log-viewer { width: 70%; background: #1e1e1e; color: #ccc; font-family: monospace; padding: 15px; overflow-y: auto; white-space: pre; font-size: 0.85rem; display: flex; flex-direction: column; }
+        .log-content { flex: 1; overflow-y: auto; white-space: pre; }
+        
+        .log-group { padding: 8px 15px; font-weight: bold; background: #e9ecef; border-bottom: 1px solid #dee2e6; font-size: 0.8rem; text-transform: uppercase; color: #555; }
+        .log-item { padding: 6px 20px; cursor: pointer; border-bottom: 1px solid #f1f1f1; word-break: break-all; }
+        .log-item:hover { background: #e2e6ea; color: #0d6efd; }
+        .log-item.active { background: #0d6efd; color: #fff; }
         
         .hidden { display: none !important; }
     </style>
@@ -30,23 +45,24 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v9</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v10</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統深度評估</a>
             <a class="nav-link" onclick="switchTab('network')">🌐 網路狀態</a>
+            <a class="nav-link" onclick="switchTab('logs')">📝 日誌瀏覽器</a>
             <a class="nav-link" onclick="switchTab('debug')">🐞 檔案檢測</a>
         </nav>
     </div>
 
     <div class="main-content">
-        <div id="loader" class="alert alert-info hidden">正在解析檔案結構...</div>
+        <div id="loader" class="alert alert-info hidden">正在建立索引與解析...</div>
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" onclick="document.getElementById('dir-input').click()">
                 <div class="fs-1 mb-2">📂</div>
                 <h4>上傳 SOS Report 資料夾</h4>
-                <p class="text-muted small">請選擇解壓縮後的資料夾</p>
+                <p class="text-muted small">支援完整目錄解析</p>
                 <input type="file" id="dir-input" webkitdirectory directory multiple class="d-none">
             </div>
         </div>
@@ -114,6 +130,22 @@
             </div>
         </div>
 
+        <div id="view-logs" class="content-view hidden">
+            <h4 class="mb-3">日誌瀏覽器 (Log Explorer)</h4>
+            <div class="log-container">
+                <div class="log-tree" id="log-tree">
+                    <div class="p-3 text-muted">請先上傳檔案</div>
+                </div>
+                <div class="log-viewer">
+                    <div class="border-bottom pb-2 mb-2 d-flex justify-content-between">
+                        <strong id="log-current-file">No file selected</strong>
+                        <input type="text" id="log-search-input" class="form-control form-control-sm w-25 bg-dark text-light border-secondary" placeholder="Search..." onkeyup="filterLogContent()">
+                    </div>
+                    <div class="log-content" id="log-content-area"></div>
+                </div>
+            </div>
+        </div>
+
         <div id="view-debug" class="content-view hidden">
             <h4>檔案索引檢測 (Debug)</h4>
             <div class="console-box" id="debug-list"></div>
@@ -126,11 +158,12 @@
             files: new Map(),
             filePaths: [],
             cache: {},
+            currentLogText: "", // For log search
             
-            // 修正後的規則：包含您的特定檔名 ps_auxwwwm 和 netstat
+            // Rules from v9
             rules: {
-                ps: [/ps_aux.*$/, /ps_auxwwwm$/], // 寬鬆匹配所有 aux 開頭，包含 m
-                netstat: [/netstat.*neopa$/, /netstat.*-W.*$/, /netstat$/], // 匹配 netstat 相關
+                ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
+                netstat: [/netstat.*neopa$/, /netstat.*-W.*$/, /netstat$/],
                 ss: [/ss_-tulpn$/],
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
@@ -164,7 +197,13 @@
             document.getElementById('debug-list').textContent = debugLog;
 
             try {
-                await Promise.all([runDashboard(), runHostInfo(), runNetwork()]);
+                // Parallel Execution
+                await Promise.all([
+                    runDashboard(), 
+                    runHostInfo(), 
+                    runNetwork(),
+                    buildLogTree() // Build the tree UI
+                ]);
                 document.getElementById('view-upload').classList.add('hidden');
                 switchTab('dashboard');
             } catch (err) {
@@ -175,16 +214,15 @@
             }
         });
 
+        // --- Core Helpers ---
         async function findAndRead(ruleKey) {
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
 
             let foundPath = null;
-            // 優先找路徑較長且包含 sos_commands 的 (通常是真身)
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length > 0) {
-                matches.sort((a, b) => b.length - a.length); // Longest path first
-                // Prefer sos_commands
+                matches.sort((a, b) => b.length - a.length); 
                 const best = matches.find(m => m.includes('sos_commands')) || matches[0];
                 foundPath = best;
             }
@@ -198,10 +236,20 @@
             return { content: null, path: null };
         }
 
+        async function readFileByPath(path) {
+            if (!App.files.has(path)) return null;
+            if (App.cache[path]) return App.cache[path];
+            const text = await App.files.get(path).text();
+            App.cache[path] = text;
+            return text;
+        }
+
         function showSrc(id, path) {
             const el = document.getElementById(id);
             if (el) el.textContent = path ? `SRC: .../${path.split('/').pop()}` : 'Not Found';
         }
+
+        // --- Modules ---
 
         async function runDashboard() {
             const h = await findAndRead('hostname');
@@ -222,7 +270,6 @@
         }
 
         async function runHostInfo() {
-            // PS 解析 (針對您的 ps_auxwwwm 格式)
             const ps = await findAndRead('ps');
             showSrc('src-ps-dash', ps.path);
             showSrc('src-ps-mid', ps.path);
@@ -230,7 +277,6 @@
             if (ps.content) {
                 const lines = ps.content.split('\n');
                 let headerIndex = -1;
-                // 找 Header
                 for(let i=0; i<Math.min(50, lines.length); i++) {
                     if (lines[i].includes('PID') && lines[i].includes('%MEM') && lines[i].includes('COMMAND')) {
                         headerIndex = i;
@@ -240,44 +286,32 @@
 
                 if (headerIndex !== -1) {
                     const parsed = [];
-                    // 解析 Header 後的每一行
                     for (let i = headerIndex + 1; i < lines.length; i++) {
                         const line = lines[i].trim();
                         if (!line) continue;
                         const parts = line.split(/\s+/);
-                        
-                        // ps auxwwwm 格式: USER PID %CPU %MEM ...
-                        // 您的檔案中有 PID 為 '-' 的行，必須過濾掉
                         const pidStr = parts[1];
-                        if (pidStr === '-' || isNaN(parseInt(pidStr))) continue;
-
+                        if (pidStr === '-' || isNaN(parseInt(pidStr))) continue; // Fix: Skip kernel threads
                         if (parts.length < 10) continue;
 
                         const mem = parseFloat(parts[3]);
                         const cpu = parseFloat(parts[2]);
                         const cmd = parts.slice(10).join(' ');
 
-                        if (!isNaN(mem)) {
-                            parsed.push({ user: parts[0], pid: pidStr, mem, cpu, cmd });
-                        }
+                        if (!isNaN(mem)) parsed.push({ user: parts[0], pid: pidStr, mem, cpu, cmd });
                     }
 
-                    // Top 5 Memory
                     const top5 = parsed.sort((a, b) => b.mem - a.mem).slice(0, 5);
                     document.getElementById('mem-table-body').innerHTML = top5.map(p => 
                         `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td>${p.cpu}%</td><td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td></tr>`
                     ).join('');
 
-                    // Middleware
                     const mwRegex = /java|python|node|httpd|nginx|mysql|postgres|docker|kube/i;
                     const mw = parsed.filter(p => mwRegex.test(p.cmd) && !p.cmd.includes(' grep '));
                     document.getElementById('info-middleware').textContent = mw.length ? mw.map(p => `${p.user} (${p.pid}): ${p.cmd}`).join('\n') : "No common middleware found.";
-                } else {
-                    document.getElementById('mem-table-body').innerHTML = "<tr><td colspan='5'>Header not found in PS file</td></tr>";
                 }
             }
 
-            // DMI
             const dmi = await findAndRead('dmidecode');
             showSrc('src-dmi', dmi.path);
             if(dmi.content) {
@@ -291,39 +325,119 @@
         }
 
         async function runNetwork() {
-            // 優先找 Netstat (因為您的報告中主要是這個)
             let net = await findAndRead('netstat');
             let source = "netstat";
-            
-            // 如果沒找到，才試試看 SS
             if (!net.content) {
                 net = await findAndRead('ss');
                 source = "ss";
             }
-
             showSrc('src-ss', net.path);
 
             if (net.content) {
                 const lines = net.content.split('\n');
                 let output = "";
-                
-                if (source === 'netstat') {
-                    // Netstat 解析：只顯示 LISTEN
-                    // 格式：Proto Recv-Q Send-Q Local Address ... State ... PID/Program
-                    output = lines.filter(l => l.includes('Proto') || l.includes('LISTEN')).join('\n');
-                } else {
-                    // SS 解析
-                    output = lines.filter(l => l.includes('State') || l.includes('LISTEN')).join('\n');
-                }
-                
+                if (source === 'netstat') output = lines.filter(l => l.includes('Proto') || l.includes('LISTEN')).join('\n');
+                else output = lines.filter(l => l.includes('State') || l.includes('LISTEN')).join('\n');
                 document.getElementById('net-ss').textContent = output || "No LISTEN ports found.";
-            } else {
-                document.getElementById('net-ss').textContent = "Netstat/SS log not found.";
             }
 
             const ip = await findAndRead('ip');
             showSrc('src-ip', ip.path);
             if(ip.content) document.getElementById('net-ip').textContent = ip.content;
+        }
+
+        // --- Log Explorer (Restored) ---
+        function buildLogTree() {
+            const tree = document.getElementById('log-tree');
+            tree.innerHTML = '';
+            
+            // Filters
+            const categories = {
+                "System": [/var\/log\/messages/, /dmesg/, /var\/log\/boot/],
+                "Security": [/var\/log\/secure/, /audit\/audit.log/],
+                "Package": [/var\/log\/dnf/, /var\/log\/yum/],
+                "Cron": [/var\/log\/cron/],
+                "Others": []
+            };
+
+            const found = { "System": [], "Security": [], "Package": [], "Cron": [], "Others": [] };
+
+            // Scan all paths
+            App.filePaths.forEach(p => {
+                // Must look like a log file
+                if (!p.includes('var/log') && !p.includes('sos_commands/logs') && !p.includes('dmesg')) return;
+                if (p.endsWith('.gz') || p.endsWith('wtmp') || p.endsWith('lastlog')) return; // Skip binaries
+
+                let matched = false;
+                for (let cat in categories) {
+                    if (cat === "Others") continue;
+                    if (categories[cat].some(r => r.test(p))) {
+                        found[cat].push(p);
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched && p.includes('var/log')) found['Others'].push(p);
+            });
+
+            // Render
+            for (let cat in found) {
+                if (found[cat].length === 0) continue;
+                
+                const title = document.createElement('div');
+                title.className = 'log-group';
+                title.textContent = cat;
+                tree.appendChild(title);
+
+                found[cat].sort(); // Alphabetical
+                found[cat].forEach(path => {
+                    const item = document.createElement('div');
+                    item.className = 'log-item';
+                    item.textContent = path.split('/').pop();
+                    item.onclick = () => loadLogContent(path, item);
+                    tree.appendChild(item);
+                });
+            }
+        }
+
+        async function loadLogContent(path, el) {
+            document.querySelectorAll('.log-item').forEach(e => e.classList.remove('active'));
+            el.classList.add('active');
+            
+            document.getElementById('log-current-file').textContent = path;
+            const viewer = document.getElementById('log-content-area');
+            viewer.textContent = "Loading...";
+
+            let text = await readFileByPath(path);
+            if (!text) {
+                viewer.textContent = "Error loading file.";
+                return;
+            }
+
+            // Truncate if too big
+            if (text.length > 50000) {
+                text = `[File too large. Showing last 50,000 characters]\n...\n` + text.slice(-50000);
+            }
+
+            App.currentLogText = text;
+            viewer.textContent = text;
+            // Auto scroll to bottom
+            viewer.scrollTop = viewer.scrollHeight;
+        }
+
+        function filterLogContent() {
+            const term = document.getElementById('log-search-input').value.toLowerCase();
+            const viewer = document.getElementById('log-content-area');
+            
+            if (!term) {
+                viewer.textContent = App.currentLogText;
+                return;
+            }
+
+            // Simple line filter
+            const lines = App.currentLogText.split('\n');
+            const filtered = lines.filter(l => l.toLowerCase().includes(term));
+            viewer.textContent = filtered.join('\n');
         }
 
         function switchTab(id) {
