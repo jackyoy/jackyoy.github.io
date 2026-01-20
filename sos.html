@@ -3,36 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v7 (Stable)</title>
+    <title>RHEL SOS Analyzer v8 (Log Analysis)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #212529; }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, sans-serif; color: #212529; }
         
-        /* 介面優化 */
-        .card { border: 1px solid rgba(0,0,0,.125); box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; border-radius: 8px; }
-        .card-header { background-color: #fff; border-bottom: 2px solid #f0f0f0; font-weight: 700; color: #495057; padding: 15px; }
-        .card-body { padding: 20px; }
+        /* 卡片與佈局 */
+        .card { border: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-radius: 8px; margin-bottom: 24px; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); }
+        .card-header { background: #fff; border-bottom: 1px solid #eee; font-weight: 700; color: #495057; padding: 15px 20px; }
         
-        /* 上傳區塊 */
-        .upload-area { border: 2px dashed #ced4da; border-radius: 12px; padding: 40px; text-align: center; background: #fff; cursor: pointer; transition: all 0.2s; }
-        .upload-area:hover { border-color: #0d6efd; background-color: #f1f8ff; transform: translateY(-2px); }
+        /* 上傳區 */
+        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 50px; text-align: center; background: #fff; cursor: pointer; transition: 0.3s; }
+        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; }
         
-        /* Debug Console */
-        .debug-console { background: #212529; color: #00ff00; font-family: 'Consolas', monospace; font-size: 0.8rem; padding: 15px; border-radius: 8px; height: 200px; overflow-y: auto; margin-top: 20px; }
-        .log-warn { color: #ffc107; } .log-err { color: #ff6b6b; } .log-debug { color: #adb5bd; }
+        /* Log Viewer 樣式 */
+        .log-viewer { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas', monospace; font-size: 0.85rem; height: 400px; overflow-y: auto; padding: 15px; border-radius: 6px; white-space: pre-wrap; line-height: 1.5; }
+        .log-line { display: block; border-bottom: 1px solid #333; padding: 2px 0; }
+        .log-line:hover { background-color: #2a2d2e; }
+        .log-date { color: #569cd6; margin-right: 10px; }
+        .log-process { color: #4ec9b0; margin-right: 10px; }
+        .log-error { color: #f44336; font-weight: bold; }
+        .log-warn { color: #ffc107; font-weight: bold; }
 
-        /* 重要：圖表容器限制 (防止無限下沉) */
-        .chart-container { position: relative; height: 250px; width: 100%; display: flex; justify-content: center; }
+        /* 除錯區 */
+        .debug-console { background: #000; color: #0f0; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 4px; height: 150px; overflow-y: auto; margin-top: 10px; }
+        
+        /* Chart Container */
+        .chart-container { position: relative; height: 220px; width: 100%; display: flex; justify-content: center; }
     </style>
 </head>
 <body>
 
-<div class="container py-5">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h2 class="fw-bold text-primary mb-0">RHEL SOS Analyzer</h2>
-            <small class="text-muted">v7.0 Stable (Fix: Chart Crash & Kernel Parsing)</small>
+            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer</h3>
+            <small class="text-muted">v8.0 (Logs + Process Fix)</small>
         </div>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">清除重置</button>
     </div>
@@ -41,8 +49,8 @@
         <div class="col-md-8">
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
                 <div class="display-4 mb-3">📂</div>
-                <h4>選擇 sosreport 資料夾</h4>
-                <p class="text-muted">已修復網頁崩潰問題與 Kernel 抓取邏輯</p>
+                <h4>載入 sosreport 資料夾</h4>
+                <p class="text-muted">本機運算，支援 Log 分析與 Process 詳細列表</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
@@ -50,24 +58,24 @@
 
     <div id="dashboard" style="display: none;">
         
-        <div class="card mb-4">
+        <div class="card">
             <div class="card-body">
                 <div class="row text-center">
                     <div class="col-md-3 border-end">
                         <small class="text-muted fw-bold">HOSTNAME</small>
-                        <h4 id="os-hostname" class="text-primary mt-1 mb-0">--</h4>
+                        <h4 id="os-hostname" class="text-primary mt-1">--</h4>
                     </div>
                     <div class="col-md-3 border-end">
                         <small class="text-muted fw-bold">RELEASE</small>
-                        <h5 id="os-release" class="mt-2 mb-0">--</h5>
+                        <h5 id="os-release" class="mt-2">--</h5>
                     </div>
                     <div class="col-md-3 border-end">
                         <small class="text-muted fw-bold">KERNEL</small>
-                        <h5 id="os-kernel" class="mt-2 mb-0 text-break">--</h5>
+                        <h5 id="os-kernel" class="mt-2 text-break">--</h5>
                     </div>
                     <div class="col-md-3">
                         <small class="text-muted fw-bold">UPTIME</small>
-                        <h5 id="os-uptime" class="mt-2 mb-0">--</h5>
+                        <h5 id="os-uptime" class="mt-2">--</h5>
                     </div>
                 </div>
             </div>
@@ -93,8 +101,15 @@
                     <div class="card-header">Top CPU Processes</div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0 small">
-                                <thead class="table-light"><tr><th>PID</th><th>User</th><th>CPU%</th><th>CMD</th></tr></thead>
+                            <table class="table table-hover mb-0 small" style="table-layout: fixed;">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 20%">PID</th>
+                                        <th style="width: 25%">User</th>
+                                        <th style="width: 20%">CPU%</th>
+                                        <th style="width: 35%">Command</th>
+                                    </tr>
+                                </thead>
                                 <tbody id="ps-tbody"></tbody>
                             </table>
                         </div>
@@ -106,32 +121,52 @@
                 <div class="card h-100">
                     <div class="card-header">Network Interfaces</div>
                     <div class="card-body p-0">
-                        <div id="net-list" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;"></div>
+                        <div id="net-list" class="list-group list-group-flush" style="max-height: 260px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>System Logs Analysis (Last 1000 lines)</span>
+                        <div class="d-flex gap-2">
+                            <select id="log-selector" class="form-select form-select-sm" style="width: 200px;" onchange="renderLog()">
+                                <option value="" disabled selected>選擇 Log 檔案...</option>
+                            </select>
+                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="過濾關鍵字 (如: error)..." style="width: 200px;" onkeyup="filterLog()">
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="log-viewer" class="log-viewer">
+                            <div class="text-center text-muted mt-5">請從右上角選擇要檢視的 Log 檔案</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="mt-4">
-        <h6 class="fw-bold text-secondary">解析日誌 (Debug Log)</h6>
-        <div class="debug-console" id="console"></div>
+    <div class="mt-2">
+        <small class="text-muted" onclick="document.getElementById('console').style.display='block'" style="cursor:pointer">Show Debug Log</small>
+        <div class="debug-console" id="console" style="display:none;"></div>
     </div>
 </div>
 
 <script>
     let fileMap = new Map();
     let filePaths = [];
+    let loadedLogs = {}; // Cache logs
 
     function log(msg, type = 'info') {
         const c = document.getElementById('console');
         const d = document.createElement('div');
-        d.innerHTML = `> ${msg}`;
-        if (type === 'warn') d.className = 'log-warn';
-        if (type === 'err') d.className = 'log-err';
-        if (type === 'debug') d.className = 'log-debug';
+        d.textContent = `> ${msg}`;
+        if (type === 'err') d.style.color = '#ff6b6b';
+        if (type === 'debug') d.style.color = '#888';
         c.appendChild(d);
-        c.scrollTop = c.scrollHeight;
     }
 
     async function handleFiles(files) {
@@ -142,72 +177,51 @@
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('console').innerHTML = '';
         
-        // Chart Cleanup (關鍵：確保舊的圖表實例被銷毀)
-        if (window.memChartInstance) {
-            window.memChartInstance.destroy();
-            window.memChartInstance = null;
-        }
+        if (window.memChartInstance) { window.memChartInstance.destroy(); window.memChartInstance = null; }
 
-        log(`載入 ${files.length} 個檔案，建立索引...`);
+        log(`Indexing ${files.length} files...`);
+        fileMap.clear(); filePaths = []; loadedLogs = {};
         
-        fileMap.clear();
-        filePaths = [];
         for (let i = 0; i < files.length; i++) {
             const path = files[i].webkitRelativePath;
             fileMap.set(path, files[i]);
             filePaths.push(path);
         }
 
-        try {
-            await parseOS();
-            await parseMemory();
-            await parseProcess();
-            await parseNetwork();
-            log("🎉 解析完成", "info");
-        } catch (e) {
-            log(`❌ 錯誤: ${e.message}`, "err");
-            console.error(e);
-        }
+        // Parallel Execution
+        await Promise.all([
+            safeRun(parseOS, 'OS'),
+            safeRun(parseMemory, 'Memory'),
+            safeRun(parseProcess, 'Process'), // Fixed Process Parser
+            safeRun(parseNetwork, 'Network'),
+            safeRun(initLogSystem, 'Logs')    // New Log System
+        ]);
+        
+        log("All tasks completed.", "info");
     }
 
-    async function findFile(keywords, checkContentFn = null) {
+    async function safeRun(fn, name) {
+        try { await fn(); } catch(e) { log(`${name} Error: ${e.message}`, 'err'); }
+    }
+
+    // --- Optimized Finder ---
+    async function findFile(keywords, checkContentFn = null, returnPath = false) {
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
         
-        // 1. 優先找 sos_commands 下的指令輸出 (通常格式最乾淨)
-        let candidates = filePaths.filter(p => 
-            kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) 
-            && p.includes('sos_commands')
-        );
-
-        // 2. 其次找 /proc 或其他位置
-        if (candidates.length === 0) {
-            candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
-        }
-
-        // 3. 寬鬆搜尋
-        if (candidates.length === 0) {
-            candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
-        }
-
-        if (candidates.length === 0) {
-            log(`⚠️ 找不到關鍵字 [${kwList}]`, 'warn');
-            return null;
-        }
+        // Priority: sos_commands > regular path > fuzzy
+        let candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) && p.includes('sos_commands'));
+        if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
+        if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
 
         for (const path of candidates) {
             const file = fileMap.get(path);
             const content = await readFileText(file);
             if (!content) continue;
             
-            if (checkContentFn) {
-                if (checkContentFn(content)) {
-                    log(`✅ 讀取: ...${path.slice(-40)}`, 'debug');
-                    return content;
-                }
-            } else {
-                log(`✅ 讀取: ...${path.slice(-40)}`, 'debug');
-                return content;
-            }
+            // Validate Content
+            if (checkContentFn && !checkContentFn(content)) continue;
+
+            return returnPath ? { content, path } : content;
         }
         return null;
     }
@@ -224,7 +238,7 @@
     // --- Parsers ---
 
     async function parseOS() {
-        const hostname = await findFile(['hostname']);
+        const hostname = await findFile('hostname');
         if (hostname) document.getElementById('os-hostname').textContent = hostname.trim();
 
         const release = await findFile(['redhat-release', 'os-release']);
@@ -233,28 +247,13 @@
             document.getElementById('os-release').textContent = m ? m[1] : release.split('\n')[0];
         }
 
-        // Kernel Fix: 優先找 uname_-r (僅版本號) 或 uname_-a
-        // 並使用 Regex 抓取版本號格式 (數字.數字.數字...)，避免 split 空白出錯
-        const uname = await findFile(['uname_-r', 'uname_-a', 'uname']);
+        const uname = await findFile(['uname_-a', 'uname']);
         if (uname) {
-            // Regex 解釋: 抓取 3.10.0-xxx 或 4.18.0-xxx 或 5.14.0-xxx
-            // 排除開頭的 Linux hostname 等字串
-            const kMatch = uname.match(/(\d+\.\d+\.\d+-\S+)/); 
-            if (kMatch) {
-                document.getElementById('os-kernel').textContent = kMatch[1];
-            } else {
-                // Fallback: 如果是純版本號 (uname -r)
-                if (uname.trim().length < 50) {
-                    document.getElementById('os-kernel').textContent = uname.trim();
-                } else {
-                    // Fallback: uname -a logic
-                    const parts = uname.split(/\s+/);
-                    if (parts.length > 2) document.getElementById('os-kernel').textContent = parts[2];
-                }
-            }
+            const m = uname.match(/(\d+\.\d+\.\d+-\S+)/); 
+            document.getElementById('os-kernel').textContent = m ? m[1] : (uname.split(/\s+/)[2] || uname);
         }
 
-        const uptime = await findFile(['uptime', 'date'], (c) => c.includes('up') && c.includes(':'));
+        const uptime = await findFile(['uptime', 'date'], c => c.includes('up'));
         if (uptime) {
             const m = uptime.match(/up\s+([^,]+)/);
             if (m) document.getElementById('os-uptime').textContent = m[1];
@@ -264,7 +263,6 @@
     async function parseMemory() {
         const data = await findFile('meminfo');
         if (!data) return;
-
         const val = (k) => { const m = data.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm')); return m ? parseInt(m[1]) : 0; };
         const total = val('MemTotal'), free = val('MemFree'), buff = val('Buffers'), cached = val('Cached'), slab = val('Slab');
         const used = total - free - buff - cached - slab;
@@ -272,55 +270,19 @@
         document.getElementById('mem-total-badge').textContent = (total/1024/1024).toFixed(1) + " GB";
 
         const ctx = document.getElementById('memChart').getContext('2d');
-        
-        // 這裡再次確保銷毀舊實例
-        if (window.memChartInstance) window.memChartInstance.destroy();
-
         window.memChartInstance = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['App Used', 'Buff/Cache', 'Free'],
-                datasets: [{ 
-                    data: [used, buff+cached+slab, free], 
-                    backgroundColor: ['#dc3545', '#ffc107', '#198754'],
-                    borderWidth: 1 
-                }]
+                labels: ['Used', 'Buff/Cache', 'Free'],
+                datasets: [{ data: [used, buff+cached+slab, free], backgroundColor: ['#dc3545', '#ffc107', '#198754'], borderWidth: 1 }]
             },
-            options: { 
-                responsive: true,
-                maintainAspectRatio: false, // 關鍵：允許圖表適應我們設定的固定高度容器
-                plugins: { legend: { position: 'right' } } 
-            }
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
         });
     }
 
-    async function parseNetwork() {
-        // 使用更寬鬆的搜尋來抓取 ip address
-        const data = await findFile(['ip_address', 'ip_-d_address', 'ip_addr'], (c) => c.includes('state') || c.includes('mtu'));
-        const list = document.getElementById('net-list');
-        list.innerHTML = '';
-        
-        if (!data) {
-            list.innerHTML = '<div class="p-3 text-muted text-center">查無 Network 資料</div>';
-            return;
-        }
-
-        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
-        let match;
-        while ((match = regex.exec(data)) !== null) {
-            const name = match[1];
-            const state = match[2];
-            const isUp = state === 'UP';
-            list.innerHTML += `
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span class="fw-bold">${name}</span>
-                    <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${state}</span>
-                </div>`;
-        }
-    }
-
+    // Fixed PS Parser
     async function parseProcess() {
-        const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], (c) => c.includes('PID'));
+        const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], c => c.includes('PID'));
         const tbody = document.getElementById('ps-tbody');
         tbody.innerHTML = ''; 
 
@@ -330,6 +292,7 @@
         let procs = [];
         let map = { user:0, pid:1, cpu:2, cmd:10 }; 
         
+        // Smart Header Detection
         for(let line of lines.slice(0,20)) {
             if(line.includes('PID') && line.includes('CPU')) {
                 const parts = line.trim().split(/\s+/);
@@ -348,25 +311,135 @@
             if (!line || line.includes('PID')) continue;
             const p = line.split(/\s+/);
             if (p.length < 10) continue;
+
+            // Safe Command Extraction
+            const cmd = p.slice(map.cmd).join(' ');
+            
             procs.push({
                 user: p[map.user],
                 pid: p[map.pid],
                 cpu: parseFloat(p[map.cpu]) || 0,
-                cmd: p.slice(map.cmd).join(' ')
+                cmd: cmd
             });
         }
 
+        // Render TOP 5 safely
         procs.sort((a,b) => b.cpu - a.cpu).slice(0, 5).forEach(p => {
-            const safeCmd = p.cmd.length > 40 ? p.cmd.substring(0, 40) + '...' : p.cmd;
-            tbody.innerHTML += `
-                <tr>
-                    <td><small>${p.pid}</small></td>
-                    <td>${p.user}</td>
-                    <td class="fw-bold text-danger">${p.cpu}%</td>
-                    <td title="${p.cmd}"><small class="text-muted">${safeCmd}</small></td>
-                </tr>`;
+            const row = document.createElement('tr');
+            
+            // 安全插入文字，防止 HTML Injection 或渲染中斷
+            row.innerHTML = `
+                <td><small>${p.pid}</small></td>
+                <td>${p.user}</td>
+                <td class="fw-bold text-danger">${p.cpu}%</td>
+                <td class="text-truncate" style="max-width: 150px;"></td>
+            `;
+            // Command 使用 textContent 賦值，避免特殊符號破壞 HTML
+            row.querySelector('.text-truncate').textContent = p.cmd;
+            tbody.appendChild(row);
         });
     }
+
+    async function parseNetwork() {
+        const data = await findFile(['ip_address', 'ip_addr', 'ip_-d_address'], c => c.includes('state'));
+        const list = document.getElementById('net-list');
+        list.innerHTML = '';
+        if (!data) return;
+
+        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
+        let match;
+        while ((match = regex.exec(data)) !== null) {
+            const isUp = match[2] === 'UP';
+            list.innerHTML += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">${match[1]}</span>
+                    <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${match[2]}</span>
+                </div>`;
+        }
+    }
+
+    // --- New: Log System ---
+    
+    async function initLogSystem() {
+        const logFiles = ['messages', 'dmesg', 'secure', 'cron', 'boot.log', 'yum.log', 'dnf.log'];
+        const select = document.getElementById('log-selector');
+        select.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
+        
+        let foundAny = false;
+
+        // 搜尋這些 Log 檔案
+        for (const logName of logFiles) {
+            // 嘗試尋找並返回路徑物件
+            const result = await findFile([logName], null, true); // true = return object {content, path}
+            
+            if (result) {
+                foundAny = true;
+                // Store in memory
+                loadedLogs[logName] = result.content;
+                
+                // Add to dropdown
+                const opt = document.createElement('option');
+                opt.value = logName;
+                opt.textContent = `${logName} (${result.path.split('/').slice(-2).join('/')})`;
+                select.appendChild(opt);
+            }
+        }
+
+        if (foundAny) {
+            log(`已索引系統 Logs，請使用下拉選單檢視。`, 'info');
+        } else {
+            document.getElementById('log-viewer').innerHTML = '<div class="text-center text-muted mt-5">未找到標準 Log 檔案 (messages/dmesg)</div>';
+        }
+    }
+
+    function renderLog() {
+        const logName = document.getElementById('log-selector').value;
+        const viewer = document.getElementById('log-viewer');
+        const filterText = document.getElementById('log-search').value.toLowerCase();
+        
+        if (!logName || !loadedLogs[logName]) return;
+
+        const content = loadedLogs[logName];
+        const lines = content.split('\n');
+        
+        // 效能優化：只取最後 1000 行
+        const tailLines = lines.slice(-1000);
+        
+        viewer.innerHTML = '';
+        let htmlBuffer = '';
+
+        tailLines.forEach(line => {
+            if (filterText && !line.toLowerCase().includes(filterText)) return;
+            if (!line.trim()) return;
+
+            // Highlight Keywords
+            let cssClass = 'log-line';
+            if (line.match(/error|fail|panic|critical/i)) cssClass += ' log-error';
+            else if (line.match(/warn|alert/i)) cssClass += ' log-warn';
+
+            // Simple formatting (Timestamp detection is hard generally, skipping for speed)
+            htmlBuffer += `<div class="${cssClass}">${escapeHtml(line)}</div>`;
+        });
+
+        viewer.innerHTML = htmlBuffer;
+        viewer.scrollTop = viewer.scrollHeight; // Scroll to bottom
+    }
+
+    function filterLog() {
+        // Debounce could be added here, but direct call is fine for 1000 lines
+        renderLog();
+    }
+
+    function escapeHtml(text) {
+        if (!text) return text;
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
 </script>
 </body>
 </html>
