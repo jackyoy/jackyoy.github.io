@@ -3,527 +3,576 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v11 (Network Details)</title>
+    <title>RHEL SOS Report Analyzer - Enterprise Edition</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --bg-dark: #212529; --accent: #0d6efd; }
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', Roboto, monospace; color: #333; }
+        :root { 
+            --bg-dark: #1e1e2f; 
+            --sidebar-width: 280px;
+            --accent-color: #0d6efd;
+            --code-bg: #2d2d3b;
+        }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; height: 100vh; overflow: hidden; display: flex; }
         
-        /* 卡片優化 */
-        .card { border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 8px; margin-bottom: 24px; }
-        .card-header { background: #fff; border-bottom: 2px solid #f1f3f5; font-weight: 700; color: #495057; padding: 15px; }
-        
-        /* 上傳區塊 */
-        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 50px; text-align: center; background: #fff; cursor: pointer; transition: 0.2s; }
-        .upload-area:hover { border-color: var(--accent); background-color: #f8fbff; }
-        
-        /* Log Viewer */
-        .log-wrapper { background: var(--bg-dark); border-radius: 6px; height: 500px; display: flex; flex-direction: column; }
-        .log-viewer { flex: 1; overflow-y: auto; padding: 15px; font-family: 'Consolas', monospace; font-size: 0.85rem; color: #ced4da; white-space: pre-wrap; }
-        .log-line { border-bottom: 1px solid #343a40; padding: 2px 0; }
-        .log-err { color: #ff8787; font-weight: bold; background: rgba(255,0,0,0.1); }
-        .log-warn { color: #ffd43b; font-weight: bold; }
-        
-        /* Network List */
-        .net-item { cursor: pointer; transition: background-color 0.2s; }
-        .net-item:hover { background-color: #f8f9fa; }
-        .net-item:active { background-color: #e9ecef; }
+        /* Sidebar */
+        .sidebar { width: var(--sidebar-width); background: var(--bg-dark); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: 700; font-size: 1.2rem; }
+        .nav-link { color: rgba(255,255,255,0.7); padding: 12px 20px; border-left: 4px solid transparent; cursor: pointer; }
+        .nav-link:hover { color: #fff; background: rgba(255,255,255,0.05); }
+        .nav-link.active { color: #fff; background: rgba(255,255,255,0.1); border-left-color: var(--accent-color); }
+        .nav-icon { margin-right: 10px; width: 20px; text-align: center; }
 
-        /* Modal */
-        .modal-body code { color: #d63384; }
-        .detail-row { border-bottom: 1px solid #eee; padding: 8px 0; }
-        .detail-label { font-weight: bold; color: #555; width: 80px; display: inline-block; }
+        /* Main Content */
+        .main-content { flex: 1; overflow-y: auto; padding: 30px; position: relative; }
+        
+        /* Components */
+        .card { border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border-radius: 8px; margin-bottom: 24px; background: #fff; }
+        .card-header { background: #fff; border-bottom: 1px solid #eee; padding: 15px 20px; font-weight: 600; color: #333; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Upload Area */
+        .upload-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; }
+        .upload-box { border: 2px dashed #ccc; padding: 60px; border-radius: 16px; background: #fff; transition: 0.3s; cursor: pointer; max-width: 600px; width: 100%; }
+        .upload-box:hover { border-color: var(--accent-color); background: #f8fbff; transform: translateY(-2px); }
+        
+        /* Data Tables */
+        .table-custom th { background-color: #f8f9fa; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: #6c757d; }
+        .table-custom td { font-size: 0.9rem; vertical-align: middle; }
+        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        .bg-pass { background-color: #d1e7dd; color: #0f5132; }
+        .bg-fail { background-color: #f8d7da; color: #842029; }
+        .bg-warn { background-color: #fff3cd; color: #664d03; }
+        
+        /* Console/Log View */
+        .console-box { background: var(--code-bg); color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 0.85rem; }
+        
+        /* Loaders */
+        .loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: 0.3s; }
+        .loading-overlay.active { visibility: visible; opacity: 1; }
 
-        /* Debug Console */
-        .debug-console { background: #000; color: #20c997; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 20px; }
-        .log-d-err { color: #fa5252; } .log-d-warn { color: #fab005; }
+        /* Utility */
+        .text-mono { font-family: 'Consolas', monospace; color: #d63384; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
-<div class="container py-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer <span class="badge bg-secondary fs-6 align-middle">v11.0</span></h3>
-            <small class="text-muted">新增：網路介面詳細資訊檢視器</small>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            RHEL SOS Analyzer
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重置</button>
+        <nav class="nav flex-column mt-3">
+            <a class="nav-link active" onclick="switchTab('dashboard')">
+                <span class="nav-icon">📊</span> 總覽 (Dashboard)
+            </a>
+            <a class="nav-link" onclick="switchTab('host-info')">
+                <span class="nav-icon">🖥️</span> 系統評估 (Host Info)
+            </a>
+            <a class="nav-link" onclick="switchTab('logs')">
+                <span class="nav-icon">📝</span> 日誌分析 (Logs)
+            </a>
+            <a class="nav-link" onclick="switchTab('network')">
+                <span class="nav-icon">🌐</span> 網路狀態 (Network)
+            </a>
+        </nav>
+        <div class="mt-auto p-3 text-center text-secondary" style="font-size: 0.8rem;">
+            v4.1 Full Analyzer<br>Client-side Processing
+        </div>
     </div>
 
-    <div class="row justify-content-center" id="upload-section">
-        <div class="col-md-8">
-            <div class="upload-area" onclick="document.getElementById('folderInput').click()">
-                <div class="display-4 mb-3">📂</div>
-                <h4>選擇 sosreport 資料夾</h4>
-                <p class="text-muted">本機解析，不需上傳</p>
-                <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
-            </div>
-        </div>
-    </div>
-
-    <div id="dashboard" style="display: none;">
+    <div class="main-content">
         
-        <div class="card">
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-md-3 border-end">
-                        <small class="text-muted fw-bold">HOSTNAME</small>
-                        <h4 id="os-hostname" class="text-primary mt-1">--</h4>
-                    </div>
-                    <div class="col-md-3 border-end">
-                        <small class="text-muted fw-bold">RELEASE</small>
-                        <h5 id="os-release" class="mt-2">--</h5>
-                    </div>
-                    <div class="col-md-3 border-end">
-                        <small class="text-muted fw-bold">KERNEL</small>
-                        <h5 id="os-kernel" class="mt-2 text-break">--</h5>
-                    </div>
-                    <div class="col-md-3">
-                        <small class="text-muted fw-bold">UPTIME</small>
-                        <h5 id="os-uptime" class="mt-2">--</h5>
-                    </div>
-                </div>
+        <div id="loader" class="loading-overlay">
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+                <div class="mt-3 fw-bold text-secondary">正在解析 SOS Report 資料結構...</div>
+                <div id="parse-status" class="small text-muted mt-1"></div>
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-lg-4 col-md-6">
-                <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between">
-                        <span>Memory Usage</span>
-                        <span id="mem-total-badge" class="badge bg-secondary">-- GB</span>
+        <div id="view-upload" class="upload-wrapper">
+            <div class="upload-box" onclick="document.getElementById('dir-input').click()">
+                <div class="mb-3">📂</div>
+                <h4>上傳 SOS Report 目錄</h4>
+                <p class="text-muted">請選擇解壓縮後的 sosreport 資料夾<br>(支援 webkitdirectory)</p>
+                <input type="file" id="dir-input" webkitdirectory directory multiple class="d-none">
+            </div>
+        </div>
+
+        <div id="view-dashboard" class="content-view hidden">
+            <h4 class="mb-4">系統總覽</h4>
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card p-3 text-center">
+                        <div class="text-secondary small">Hostname</div>
+                        <div class="fw-bold fs-5 text-primary" id="dash-hostname">-</div>
                     </div>
-                    <div class="card-body">
-                        <div style="height: 250px; position: relative;">
-                            <canvas id="memChart"></canvas>
-                        </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-3 text-center">
+                        <div class="text-secondary small">Release</div>
+                        <div class="fw-bold fs-5" id="dash-release">-</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-3 text-center">
+                        <div class="text-secondary small">Kernel</div>
+                        <div class="fw-bold fs-6 text-mono" id="dash-kernel">-</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-3 text-center">
+                        <div class="text-secondary small">Uptime</div>
+                        <div class="fw-bold fs-5" id="dash-uptime">-</div>
                     </div>
                 </div>
             </div>
-
-            <div class="col-lg-8 col-md-6">
-                <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>Top CPU Processes</span>
-                        <span class="badge bg-info text-dark">Main Processes Only</span>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover table-proc mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th width="10%">PID</th>
-                                        <th width="15%">User</th>
-                                        <th width="10%">CPU%</th>
-                                        <th width="10%">MEM%</th>
-                                        <th width="10%">RSS (MB)</th>
-                                        <th width="45%">Command</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="ps-tbody">
-                                    <tr><td colspan="6" class="text-center text-muted py-4">等待資料解析...</td></tr>
-                                </tbody>
+            
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Top Memory Processes</div>
+                        <div class="card-body p-0">
+                            <table class="table table-custom table-hover mb-0" id="dash-mem-table">
+                                <thead><tr><th>USER</th><th>PID</th><th>%MEM</th><th>COMMAND</th></tr></thead>
+                                <tbody></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="row">
-            <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-header">Network Interfaces <small class="text-muted fw-normal ms-2">(Click for details)</small></div>
-                    <div class="card-body p-0">
-                        <div id="net-list" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-8">
-                <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                        <span>System Logs</span>
-                        <div class="d-flex gap-2">
-                            <select id="log-selector" class="form-select form-select-sm" style="width: 250px;" onchange="renderLog()">
-                                <option value="" disabled selected>掃描中...</option>
-                            </select>
-                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="關鍵字過濾..." style="width: 150px;" onkeyup="filterLog()">
-                        </div>
-                    </div>
-                    <div class="card-body p-0 bg-dark">
-                        <div class="log-wrapper">
-                            <div id="log-viewer" class="log-viewer">
-                                <div class="text-center text-muted mt-5 pt-5">請從上方選單選擇 Log 檔案</div>
-                            </div>
-                            <div class="bg-secondary text-white px-3 py-1 small d-flex justify-content-between">
-                                <span id="log-status">Ready</span>
-                                <span>Displaying Last 2000 Lines</span>
-                            </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Critical Issues (Last 30 Days)</div>
+                        <div class="card-body">
+                            <canvas id="issuesChart" height="200"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <div class="mt-3">
-        <h6 class="fw-bold text-secondary" style="cursor:pointer" onclick="document.getElementById('console').classList.toggle('d-none')">Debug Console (Click to toggle)</h6>
-        <div class="debug-console" id="console"></div>
-    </div>
-</div>
-
-<div class="modal fade" id="netDetailModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold" id="modal-title">Interface Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="modal-body">
+        <div id="view-host-info" class="content-view hidden">
+            <h4 class="mb-4">深度系統評估 (Host Info Full)</h4>
+            
+            <div class="card">
+                <div class="card-header">
+                    <span>1. 硬體與韌體 (Hardware Layer)</span>
+                    <span class="badge bg-secondary">dmidecode / lspci</span>
                 </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                <div class="card-body">
+                    <div class="row detail-row mb-3">
+                        <div class="col-3 text-secondary">Product Name</div>
+                        <div class="col-9 fw-bold" id="info-product">-</div>
+                    </div>
+                    <div class="row detail-row mb-3">
+                        <div class="col-3 text-secondary">BIOS Version</div>
+                        <div class="col-9" id="info-bios">-</div>
+                    </div>
+                    <div class="row detail-row mb-3">
+                        <div class="col-3 text-secondary">Vendor</div>
+                        <div class="col-9" id="info-vendor">-</div>
+                    </div>
+                    <hr>
+                    <h6>PCI Devices Summary</h6>
+                    <div class="console-box" id="info-pci">Waiting for data...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span>2. 作業系統核心 (OS & Kernel)</span>
+                    <span class="badge bg-secondary">sysctl / tainted</span>
+                </div>
+                <div class="card-body">
+                    <table class="table table-bordered">
+                        <tbody>
+                            <tr>
+                                <th class="bg-light w-25">Kernel Tainted</th>
+                                <td id="info-tainted">-</td>
+                            </tr>
+                            <tr>
+                                <th class="bg-light">SELinux Status</th>
+                                <td id="info-selinux">-</td>
+                            </tr>
+                            <tr>
+                                <th class="bg-light">Default Target</th>
+                                <td id="info-target">-</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <h6 class="mt-4">Important Sysctl Parameters</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped small" id="table-sysctl">
+                            <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span>3. 中介軟體與應用 (Middleware & Processes)</span>
+                    <span class="badge bg-secondary">ps / systemd</span>
+                </div>
+                <div class="card-body">
+                    <h6>Detected Middleware Processes (Java/Web/DB)</h6>
+                    <div class="console-box mb-3" id="info-middleware">Searching...</div>
+                    
+                    <h6>Active Systemd Units (Failed/Active)</h6>
+                    <div class="console-box" id="info-systemd">Analyzing...</div>
+                </div>
             </div>
         </div>
+
+        <div id="view-logs" class="content-view hidden">
+            <div class="card h-100">
+                <div class="card-header">
+                    <div>
+                        系統日誌 (dmesg / messages)
+                        <select class="form-select d-inline-block w-auto ms-2 form-select-sm" id="log-selector">
+                            <option value="dmesg">dmesg</option>
+                            <option value="messages">var/log/messages (or journal)</option>
+                        </select>
+                    </div>
+                    <input type="text" class="form-control form-control-sm w-25" placeholder="過濾關鍵字..." id="log-search" onkeyup="filterLog()">
+                </div>
+                <div class="console-box" style="flex:1; max-height:none; background:#1e1e1e;" id="log-viewer">
+                    請先上傳檔案...
+                </div>
+            </div>
+        </div>
+
+        <div id="view-network" class="content-view hidden">
+            <div class="card">
+                <div class="card-header">網路介面與路由</div>
+                <div class="card-body">
+                    <pre id="net-ip" class="console-box">Pending...</pre>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Listening Ports (ss -tulpn)</div>
+                <div class="card-body">
+                    <pre id="net-ports" class="console-box">Pending...</pre>
+                </div>
+            </div>
+        </div>
+
     </div>
-</div>
 
-<script>
-    let fileMap = new Map();
-    let filePaths = [];
-    let logCache = {};
-    let networkData = {}; // 儲存詳細網路資訊
+    <script>
+        // --- 核心資料結構 ---
+        const AppState = {
+            files: new Map(), // 存儲 path -> File object
+            sosRoot: '',      // SOS report 的根目錄名稱
+            cache: {},        // 緩存解析結果
+            textCache: {}     // 緩存讀取的文字內容
+        };
 
-    function log(msg, type = 'info') {
-        const c = document.getElementById('console');
-        const d = document.createElement('div');
-        d.textContent = `> ${msg}`;
-        if (type === 'err') d.className = 'log-d-err';
-        if (type === 'warn') d.className = 'log-d-warn';
-        c.appendChild(d);
-        c.scrollTop = c.scrollHeight;
-    }
+        // --- 檔案處理邏輯 ---
+        document.getElementById('dir-input').addEventListener('change', async (e) => {
+            const fileList = e.target.files;
+            if (!fileList.length) return;
 
-    async function handleFiles(files) {
-        if (files.length === 0) return;
-        
-        document.getElementById('upload-section').style.display = 'none';
-        document.getElementById('dashboard').style.display = 'block';
-        document.getElementById('console').innerHTML = '';
-        logCache = {};
-        networkData = {};
+            toggleLoader(true);
+            AppState.files.clear();
+            AppState.textCache = {};
+            
+            // 建立檔案索引並尋找 Root
+            let shortestPath = null;
+            
+            Array.from(fileList).forEach(file => {
+                const path = file.webkitRelativePath;
+                AppState.files.set(path, file);
+                
+                // 簡單判斷根目錄: 取第一個斜線前的字串
+                const rootPart = path.split('/')[0];
+                if (!AppState.sosRoot) AppState.sosRoot = rootPart;
+            });
 
-        log(`Indexing ${files.length} files...`);
-        fileMap.clear(); filePaths = [];
-        
-        for (let i = 0; i < files.length; i++) {
-            const path = files[i].webkitRelativePath;
-            fileMap.set(path, files[i]);
-            filePaths.push(path);
-        }
+            console.log(`Loaded ${AppState.files.size} files. Root: ${AppState.sosRoot}`);
+            
+            try {
+                await runAnalysis();
+                document.getElementById('view-upload').classList.add('hidden');
+                switchTab('dashboard');
+            } catch (err) {
+                console.error(err);
+                alert("解析失敗: " + err.message);
+            } finally {
+                toggleLoader(false);
+            }
+        });
 
-        try {
+        // --- 解析主流程 ---
+        async function runAnalysis() {
+            updateStatus("正在分析 Hostname 與版本...");
+            await parseBasicInfo();
+            
+            updateStatus("正在掃描硬體資訊...");
+            await parseHardware();
+            
+            updateStatus("正在分析系統參數...");
             await parseOS();
-            await parseMemory();
-            await parseProcess(); 
-            await parseNetwork(); // 重點升級
-            await initLogSystem();
-            log("🎉 解析完畢", "info");
-        } catch (e) {
-            log(`❌ 錯誤: ${e.message}`, "err");
-            console.error(e);
-        }
-    }
-
-    // --- Helpers ---
-    async function findFile(keywords, checkFn = null, returnPath = false) {
-        const kwList = Array.isArray(keywords) ? keywords : [keywords];
-        let candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) && p.includes('sos_commands'));
-        if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
-        if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
-
-        for (const path of candidates) {
-            const content = await readFileText(fileMap.get(path));
-            if (!content) continue;
-            if (checkFn && !checkFn(content)) continue;
-            return returnPath ? { content, path } : content;
-        }
-        return null;
-    }
-
-    function findFilesByRegex(regex) {
-        return filePaths.filter(p => regex.test(p) && !p.endsWith('.xz') && !p.endsWith('.gz'));
-    }
-
-    function readFileText(file) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = () => resolve(null);
-            reader.readAsText(file);
-        });
-    }
-
-    // --- Parsers ---
-
-    async function parseOS() {
-        const hostname = await findFile('hostname');
-        if (hostname) document.getElementById('os-hostname').textContent = hostname.trim();
-
-        const release = await findFile(['redhat-release', 'os-release']);
-        if (release) {
-            const m = release.match(/PRETTY_NAME="([^"]+)"/);
-            document.getElementById('os-release').textContent = m ? m[1] : release.split('\n')[0];
+            
+            updateStatus("正在分析進程與網路...");
+            await parseMiddleware();
+            
+            updateStatus("完成");
         }
 
-        const uname = await findFile(['uname_-a', 'uname']);
-        if (uname) {
-            const m = uname.match(/(\d+\.\d+\.\d+-\S+)/); 
-            document.getElementById('os-kernel').textContent = m ? m[1] : (uname.split(/\s+/)[2] || uname);
+        // --- 工具函式: 讀取檔案 ---
+        async function readFile(subPath) {
+            // 嘗試多種可能路徑 (因為不同版本 SOS report 結構略有不同)
+            const possiblePaths = [
+                `${AppState.sosRoot}/${subPath}`,
+                `${AppState.sosRoot}/sos_commands/${subPath}`,
+                `${AppState.sosRoot}/${subPath.replace(/\//g, '_')}` // 舊版有時會扁平化
+            ];
+
+            // 模糊搜尋 Map keys
+            let targetKey = null;
+            for (let p of possiblePaths) {
+                if (AppState.files.has(p)) {
+                    targetKey = p;
+                    break;
+                }
+            }
+            
+            // 如果精確路徑找不到，嘗試 Regex 匹配檔案名
+            if (!targetKey) {
+                const fileName = subPath.split('/').pop(); // 例如 lspci_-nnvv
+                for (let key of AppState.files.keys()) {
+                    if (key.includes(fileName)) {
+                        targetKey = key;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetKey) return null;
+            
+            if (AppState.textCache[targetKey]) return AppState.textCache[targetKey];
+
+            const file = AppState.files.get(targetKey);
+            const text = await file.text();
+            AppState.textCache[targetKey] = text;
+            return text;
         }
 
-        const uptime = await findFile(['uptime', 'date'], c => c.includes('up'));
-        if (uptime) {
-            const m = uptime.match(/up\s+([^,]+)/);
-            if (m) document.getElementById('os-uptime').textContent = m[1];
+        // --- 模組 1: 基礎資訊 ---
+        async function parseBasicInfo() {
+            // Hostname
+            const hostname = await readFile('hostname') || await readFile('sos_commands/host/hostname');
+            setText('dash-hostname', hostname ? hostname.trim() : 'Unknown');
+
+            // Release
+            const release = await readFile('etc/redhat-release') || await readFile('sos_commands/general/redhat-release');
+            setText('dash-release', release ? release.trim() : 'Unknown');
+
+            // Kernel
+            const uname = await readFile('sos_commands/kernel/uname_-a');
+            setText('dash-kernel', uname ? uname.trim() : 'Unknown');
+
+            // Uptime
+            const uptime = await readFile('uptime') || await readFile('sos_commands/host/uptime');
+            setText('dash-uptime', uptime ? uptime.trim() : '-');
         }
-    }
 
-    async function parseMemory() {
-        const data = await findFile('meminfo');
-        if (!data) return;
-        const val = (k) => { const m = data.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm')); return m ? parseInt(m[1]) : 0; };
-        const total = val('MemTotal'), free = val('MemFree'), buff = val('Buffers'), cached = val('Cached'), slab = val('Slab');
-        const used = total - free - buff - cached - slab;
-        
-        document.getElementById('mem-total-badge').textContent = (total/1024/1024).toFixed(1) + " GB";
+        // --- 模組 2: 硬體層 ---
+        async function parseHardware() {
+            const dmidecode = await readFile('sos_commands/hardware/dmidecode');
+            if (dmidecode) {
+                const product = dmidecode.match(/Product Name:\s*(.+)/);
+                const vendor = dmidecode.match(/Manufacturer:\s*(.+)/);
+                const bios = dmidecode.match(/Version:\s*(.+)/); // BIOS Section usually first
+                
+                setText('info-product', product ? product[1] : '-');
+                setText('info-vendor', vendor ? vendor[1] : '-');
+                setText('info-bios', bios ? bios[1] : '-');
+            }
 
-        if (window.memChartInstance) window.memChartInstance.destroy();
-        const ctx = document.getElementById('memChart').getContext('2d');
-        window.memChartInstance = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['App Used', 'Buff/Cache', 'Free'],
-                datasets: [{ data: [used, buff+cached+slab, free], backgroundColor: ['#dc3545', '#ffc107', '#198754'], borderWidth: 1 }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-        });
-    }
-
-    async function parseProcess() {
-        const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], c => c.includes('PID'));
-        const tbody = document.getElementById('ps-tbody');
-        tbody.innerHTML = '';
-
-        if (!data) { tbody.innerHTML = '<tr><td colspan="6" class="text-center">No PS Data</td></tr>'; return; }
-
-        const lines = data.split('\n');
-        let procs = [];
-        let map = { user:0, pid:1, cpu:2, mem:3, rss:5, cmd:10 }; 
-        
-        for(let i=0; i<Math.min(lines.length, 50); i++) {
-            const line = lines[i].trim();
-            if(line.includes('PID') && line.includes('CPU')) {
-                const parts = line.split(/\s+/);
-                map.user = parts.indexOf('USER');
-                map.pid = parts.indexOf('PID');
-                map.cpu = parts.findIndex(c => c.includes('CPU'));
-                map.mem = parts.findIndex(c => c.includes('MEM'));
-                map.rss = parts.indexOf('RSS');
-                map.cmd = parts.indexOf('COMMAND');
-                if (map.cmd === -1) map.cmd = parts.indexOf('CMD');
-                if (map.cmd === -1) map.cmd = 10; 
-                break;
+            const lspci = await readFile('sos_commands/pci/lspci_-nnvv') || await readFile('lspci');
+            if (lspci) {
+                // 簡化顯示，只顯示主要控制器
+                const lines = lspci.split('\n');
+                const interesting = lines.filter(l => l.match(/RAID|VGA|Ethernet|Fibre|HBA|NVIDIA/i)).slice(0, 15).join('\n');
+                setText('info-pci', interesting + (lines.length > 15 ? '\n... (more)' : ''));
+            } else {
+                setText('info-pci', 'lspci log not found');
             }
         }
 
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line || line.startsWith('USER') || line.includes('PID')) continue;
-            const parts = line.split(/\s+/);
-            if (parts.length < 8) continue;
+        // --- 模組 3: OS & Kernel ---
+        async function parseOS() {
+            // Tainted
+            // 嘗試從 sysctl 或 dmesg 找
+            const sysctl = await readFile('sos_commands/kernel/sysctl_-a') || await readFile('sysctl.conf'); // sysctl.conf is static, command is better
+            let tainted = 'Unknown';
+            if (sysctl) {
+                const m = sysctl.match(/kernel.tainted\s*=\s*(\d+)/);
+                tainted = m ? (m[1] == '0' ? '0 (Not Tainted)' : `${m[1]} (Tainted)`) : 'Not found in sysctl';
+            }
             
-            const pid = parts[map.pid];
-            if (pid === '-') continue; // Filter threads
+            // Re-check detailed tainted if dmesg available
+            const dmesg = await readFile('sos_commands/kernel/dmesg');
+            if (dmesg && tainted !== '0 (Not Tainted)') {
+                if (dmesg.includes('Tainted: G')) tainted += ' (Proprietary Modules Loaded)';
+            }
+            setText('info-tainted', tainted);
 
-            const cpu = parseFloat(parts[map.cpu]);
-            const mem = parseFloat(parts[map.mem]);
-            const rss = parseInt(parts[map.rss]); 
-            const cmd = parts.slice(map.cmd).join(' ');
+            // SELinux
+            const sestatus = await readFile('sos_commands/selinux/sestatus');
+            if (sestatus) {
+                const mode = sestatus.match(/Current mode:\s*(.+)/);
+                setText('info-selinux', mode ? mode[1] : 'Unknown');
+            } else {
+                // Fallback check config
+                const selinuxConf = await readFile('etc/selinux/config');
+                const m = selinuxConf ? selinuxConf.match(/^SELINUX=(.+)/m) : null;
+                setText('info-selinux', m ? `Configured: ${m[1]}` : 'Unknown');
+            }
 
-            if (!isNaN(cpu)) procs.push({ user: parts[map.user], pid, cpu, mem, rss, cmd });
+            // Sysctl Table
+            if (sysctl) {
+                const keys = ['vm.swappiness', 'net.ipv4.ip_forward', 'kernel.pid_max', 'fs.file-max', 'vm.overcommit_memory'];
+                const tbody = document.querySelector('#table-sysctl tbody');
+                tbody.innerHTML = '';
+                keys.forEach(k => {
+                    const regex = new RegExp(`^${k.replace(/\./g, '\\.')}\\s*=\s*(.+)`, 'm');
+                    const match = sysctl.match(regex);
+                    if (match) {
+                        tbody.innerHTML += `<tr><td>${k}</td><td class="text-mono">${match[1]}</td></tr>`;
+                    }
+                });
+            }
         }
 
-        procs.sort((a,b) => b.cpu - a.cpu).slice(0, 8).forEach(p => {
-            const row = document.createElement('tr');
-            const rssMB = (p.rss / 1024).toFixed(1);
-            row.innerHTML = `
-                <td><span class="badge bg-light text-dark border">${p.pid}</span></td>
-                <td>${p.user}</td>
-                <td class="fw-bold text-danger">${p.cpu}%</td>
-                <td>${p.mem}%</td>
-                <td>${rssMB}</td>
-                <td class="cmd-col" title="${p.cmd}">${p.cmd}</td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
+        // --- 模組 4: Middleware & App ---
+        async function parseMiddleware() {
+            // 1. Processes
+            const ps = await readFile('sos_commands/process/ps_auxww') || await readFile('ps');
+            if (ps) {
+                const lines = ps.split('\n');
+                // Filter middleware
+                const mwRegex = /java|httpd|nginx|mqm|postgres|mysql|oracle|jboss|wildfly|openshift|kube|python/i;
+                const mwLines = lines.filter(l => mwRegex.test(l) && !l.includes(' grep '));
+                
+                setText('info-middleware', mwLines.length > 0 ? mwLines.join('\n') : 'No common middleware processes detected.');
 
-    // --- 網路升級：區塊解析與互動 ---
-    async function parseNetwork() {
-        const data = await findFile(['ip_address', 'ip_addr', 'ip_-d_address'], c => c.includes('state'));
-        const list = document.getElementById('net-list');
-        list.innerHTML = '';
-        
-        if (!data) return;
+                // Dash Memory Table
+                // Assuming ps format: USER PID %CPU %MEM ...
+                // Skip header, sort by mem (4th column roughly)
+                const sorted = lines.slice(1).map(l => {
+                    const parts = l.trim().split(/\s+/);
+                    return { user: parts[0], pid: parts[1], mem: parseFloat(parts[3]), cmd: parts.slice(10).join(' ') };
+                }).sort((a,b) => b.mem - a.mem).slice(0, 5);
 
-        // 利用正規表達式將每個介面切分成獨立區塊
-        // ^\d+: 匹配行首的 "1: lo: ..."
-        const interfaces = data.split(/^\d+:\s+/m).filter(Boolean);
-        
-        interfaces.forEach((block, index) => {
-            // 第一行通常包含 Name, Flags, MTU, State
-            const lines = block.split('\n');
-            const header = lines[0];
+                const memTable = document.querySelector('#dash-mem-table tbody');
+                memTable.innerHTML = '';
+                sorted.forEach(row => {
+                    memTable.innerHTML += `<tr><td>${row.user}</td><td>${row.pid}</td><td>${row.mem}%</td><td class="text-truncate" style="max-width: 150px;">${row.cmd}</td></tr>`;
+                });
+            }
+
+            // 2. Systemd
+            const systemd = await readFile('sos_commands/systemd/systemctl_list-unit-files');
+            if (systemd) {
+                const failed = (await readFile('sos_commands/systemd/systemctl_list-units_--state_failed') || '').trim();
+                let output = "";
+                if (failed && !failed.includes('0 loaded units listed')) {
+                    output += "!!! FAILED UNITS DETECTED !!!\n" + failed + "\n\n";
+                }
+                output += "--- Enabled Services Sample ---\n";
+                const enabled = systemd.split('\n').filter(l => l.includes('enabled')).slice(0, 10).join('\n');
+                output += enabled + "\n...";
+                setText('info-systemd', output);
+            }
+
+            // 3. Network
+            const ipObj = await readFile('sos_commands/networking/ip_-o_addr');
+            if (ipObj) setText('net-ip', ipObj);
             
-            const nameMatch = header.match(/^([^:]+):/);
-            const name = nameMatch ? nameMatch[1].trim() : `iface-${index}`;
-            
-            // 解析 State
-            const stateMatch = header.match(/state\s+(\w+)/);
-            const state = stateMatch ? stateMatch[1] : 'UNKNOWN';
-            
-            // 解析 MTU
-            const mtuMatch = header.match(/mtu\s+(\d+)/);
-            const mtu = mtuMatch ? mtuMatch[1] : 'N/A';
-
-            // 解析 MAC
-            const macMatch = block.match(/link\/ether\s+([0-9a-f:]{17})/);
-            const mac = macMatch ? macMatch[1] : 'N/A';
-
-            // 解析 IPs (IPv4 & IPv6)
-            const ipv4s = [...block.matchAll(/inet\s+([0-9./]+)/g)].map(m => m[1]);
-            const ipv6s = [...block.matchAll(/inet6\s+([0-9a-f:/]+)/g)].map(m => m[1]);
-
-            // 解析 Flags (<BROADCAST,MULTICAST...>)
-            const flagsMatch = header.match(/<([^>]+)>/);
-            const flags = flagsMatch ? flagsMatch[1] : '';
-
-            // 儲存至全域物件以便 Modal 使用
-            networkData[name] = { state, mtu, mac, ipv4s, ipv6s, flags };
-
-            // Render List Item
-            const isUp = state === 'UP';
-            const item = document.createElement('div');
-            item.className = 'list-group-item d-flex justify-content-between align-items-center net-item px-3 py-2';
-            item.onclick = () => showNetDetail(name);
-            item.innerHTML = `
-                <div>
-                    <span class="fw-bold">${name}</span>
-                    <small class="text-muted d-block" style="font-size: 0.75rem">${mac}</small>
-                </div>
-                <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${state}</span>
-            `;
-            list.appendChild(item);
-        });
-    }
-
-    function showNetDetail(name) {
-        const data = networkData[name];
-        if (!data) return;
-
-        const modalTitle = document.getElementById('modal-title');
-        const modalBody = document.getElementById('modal-body');
-        
-        modalTitle.textContent = `${name} Details`;
-        
-        let ipHtml = '';
-        if (data.ipv4s.length > 0) ipHtml += data.ipv4s.map(ip => `<div><code>${ip}</code> (IPv4)</div>`).join('');
-        if (data.ipv6s.length > 0) ipHtml += data.ipv6s.map(ip => `<div><code>${ip}</code> (IPv6)</div>`).join('');
-        if (ipHtml === '') ipHtml = '<span class="text-muted">No IP Address assigned</span>';
-
-        modalBody.innerHTML = `
-            <div class="detail-row"><span class="detail-label">State:</span> <span class="badge ${data.state==='UP'?'bg-success':'bg-secondary'}">${data.state}</span></div>
-            <div class="detail-row"><span class="detail-label">MAC:</span> <code>${data.mac}</code></div>
-            <div class="detail-row"><span class="detail-label">MTU:</span> ${data.mtu}</div>
-            <div class="detail-row"><span class="detail-label">Flags:</span> <small class="text-muted">${data.flags}</small></div>
-            <div class="mt-3">
-                <span class="detail-label mb-2 d-block">IP Addresses:</span>
-                <div class="ps-2 border-start border-3">${ipHtml}</div>
-            </div>
-        `;
-
-        new bootstrap.Modal(document.getElementById('netDetailModal')).show();
-    }
-
-    // --- Log System ---
-    async function initLogSystem() {
-        const selector = document.getElementById('log-selector');
-        selector.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
-
-        const logPaths = findFilesByRegex(/.*\/(messages|dmesg|secure|cron|boot\.log|yum\.log|dnf\.log)([-\.]\d+)?$/);
-        
-        if (logPaths.length === 0) {
-            log("未找到系統日誌檔", "warn");
-            return;
+            const ports = await readFile('sos_commands/networking/ss_-tulpn') || await readFile('netstat'); // netstat usually needs args
+            if (ports) setText('net-ports', ports);
         }
 
-        logPaths.sort(); 
+        // --- Log Viewer Logic ---
+        async function loadLog(type) {
+            const viewer = document.getElementById('log-viewer');
+            viewer.textContent = "Loading...";
+            
+            let content = null;
+            if (type === 'dmesg') content = await readFile('sos_commands/kernel/dmesg');
+            else content = await readFile('var/log/messages') || await readFile('sos_commands/logs/journalctl_--no-pager');
 
-        logPaths.forEach(path => {
-            const fileName = path.split('/').pop();
-            const opt = document.createElement('option');
-            opt.value = path;
-            opt.textContent = fileName;
-            selector.appendChild(opt);
-        });
-    }
+            if (!content) {
+                viewer.textContent = "Log file not found in report.";
+                return;
+            }
 
-    async function renderLog() {
-        const path = document.getElementById('log-selector').value;
-        if (!path) return;
-
-        document.getElementById('log-status').textContent = "讀取中...";
-        const viewer = document.getElementById('log-viewer');
-        viewer.innerHTML = '';
-
-        let content = logCache[path];
-        if (!content) {
-            const file = fileMap.get(path);
-            content = await readFileText(file);
-            logCache[path] = content;
+            // Limit size for browser performance
+            const lines = content.split('\n');
+            const maxLines = 5000;
+            const displayLines = lines.slice(-maxLines);
+            
+            viewer.textContent = displayLines.join('\n');
+            if (lines.length > maxLines) {
+                viewer.textContent = `[Displaying last ${maxLines} lines of ${lines.length} lines]\n\n` + viewer.textContent;
+            }
         }
 
-        const lines = content.split('\n');
-        const tail = lines.slice(-2000); 
-        
-        let html = '';
-        tail.forEach(line => {
-            if (!line.trim()) return;
-            let cls = 'log-line';
-            if (line.match(/error|fail|panic|critical|denied/i)) cls += ' log-err';
-            else if (line.match(/warn|alert/i)) cls += ' log-warn';
+        document.getElementById('log-selector').addEventListener('change', (e) => {
+            loadLog(e.target.value);
+        });
+
+        // --- UI Helpers ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.content-view').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
             
-            const safeLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            html += `<div class="${cls}">${safeLine}</div>`;
-        });
+            const target = document.getElementById('view-' + tabId);
+            if (target) target.classList.remove('hidden');
+            
+            // Highlight nav
+            const nav = Array.from(document.querySelectorAll('.nav-link')).find(el => el.getAttribute('onclick').includes(tabId));
+            if (nav) nav.classList.add('active');
 
-        viewer.innerHTML = html;
-        viewer.scrollTop = viewer.scrollHeight;
-        document.getElementById('log-status').textContent = `Loaded ${path.split('/').pop()} (${lines.length} lines)`;
-    }
+            if (tabId === 'logs') loadLog(document.getElementById('log-selector').value);
+        }
 
-    function filterLog() {
-        const keyword = document.getElementById('log-search').value.toLowerCase();
-        const lines = document.querySelectorAll('.log-line');
-        lines.forEach(div => {
-            div.style.display = div.textContent.toLowerCase().includes(keyword) ? 'block' : 'none';
-        });
-    }
+        function setText(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.innerText = text;
+        }
 
-</script>
+        function toggleLoader(show) {
+            const el = document.getElementById('loader');
+            if (show) el.classList.add('active');
+            else el.classList.remove('active');
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('parse-status').innerText = msg;
+        }
+
+        function filterLog() {
+            const term = document.getElementById('log-search').value.toLowerCase();
+            const viewer = document.getElementById('log-viewer');
+            if (!viewer._originalText) viewer._originalText = viewer.textContent;
+            
+            if (!term) {
+                viewer.textContent = viewer._originalText;
+                return;
+            }
+
+            const lines = viewer._originalText.split('\n');
+            const filtered = lines.filter(l => l.toLowerCase().includes(term));
+            viewer.textContent = filtered.join('\n');
+        }
+
+    </script>
 </body>
 </html>
