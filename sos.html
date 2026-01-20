@@ -3,36 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v9 (Multi-Log & Fix)</title>
+    <title>RHEL SOS Analyzer v10 (Process & Logs Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333; }
+        :root { --bg-dark: #212529; --accent: #0d6efd; }
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Roboto, monospace; color: #333; }
         
-        /* 介面優化 */
-        .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 24px; border-radius: 8px; }
-        .card-header { background-color: #fff; border-bottom: 2px solid #f1f3f5; font-weight: 700; color: #495057; padding: 16px; }
-        .card-body { padding: 20px; }
+        /* 儀表板卡片 */
+        .card { border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 8px; margin-bottom: 24px; }
+        .card-header { background: #fff; border-bottom: 2px solid #f1f3f5; font-weight: 700; color: #495057; padding: 15px; }
         
         /* 上傳區塊 */
-        .upload-area { border: 2px dashed #ced4da; border-radius: 12px; padding: 40px; text-align: center; background: #fff; cursor: pointer; transition: all 0.2s; }
-        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; transform: scale(1.01); }
+        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 50px; text-align: center; background: #fff; cursor: pointer; transition: 0.2s; }
+        .upload-area:hover { border-color: var(--accent); background-color: #f8fbff; }
         
         /* Log Viewer */
-        .log-container { background: #212529; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; height: 500px; }
-        .log-viewer { flex: 1; overflow-y: auto; padding: 15px; font-family: 'Consolas', monospace; font-size: 0.85rem; color: #e9ecef; white-space: pre-wrap; }
+        .log-wrapper { background: var(--bg-dark); border-radius: 6px; height: 500px; display: flex; flex-direction: column; }
+        .log-viewer { flex: 1; overflow-y: auto; padding: 15px; font-family: 'Consolas', monospace; font-size: 0.85rem; color: #ced4da; white-space: pre-wrap; }
         .log-line { border-bottom: 1px solid #343a40; padding: 2px 0; }
-        .log-line:hover { background-color: #343a40; }
-        .log-err { color: #ff6b6b; font-weight: bold; background: rgba(255, 107, 107, 0.1); }
-        .log-warn { color: #fcc419; font-weight: bold; }
-        .log-date { color: #4dabf7; margin-right: 8px; }
-
+        .log-err { color: #ff8787; font-weight: bold; background: rgba(255,0,0,0.1); }
+        .log-warn { color: #ffd43b; font-weight: bold; }
+        
+        /* 表格優化 */
+        .table-proc th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .table-proc td { vertical-align: middle; }
+        .cmd-col { max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
         /* Debug Console */
-        .debug-console { background: #000; color: #2ecc71; font-family: monospace; font-size: 0.75rem; padding: 15px; border-radius: 8px; height: 200px; overflow-y: auto; margin-top: 20px; }
-        .dbg-err { color: #fa5252; } .dbg-warn { color: #fab005; } .dbg-info { color: #adb5bd; }
-
-        /* Chart */
-        .chart-wrapper { position: relative; height: 250px; width: 100%; display: flex; justify-content: center; }
+        .debug-console { background: #000; color: #20c997; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 20px; }
+        .log-d-err { color: #fa5252; } .log-d-warn { color: #fab005; }
     </style>
 </head>
 <body>
@@ -40,10 +40,10 @@
 <div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer</h3>
-            <small class="text-muted">v9.0 (支援多重 Log 與 Process 解析修復)</small>
+            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer <span class="badge bg-secondary fs-6 align-middle">v10.0</span></h3>
+            <small class="text-muted">支援 ps_auxwwwm 解析與歷史 Log 輪替檔</small>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重新載入</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重置</button>
     </div>
 
     <div class="row justify-content-center" id="upload-section">
@@ -51,7 +51,7 @@
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
                 <div class="display-4 mb-3">📂</div>
                 <h4>選擇 sosreport 資料夾</h4>
-                <p class="text-muted">將自動掃描所有歷史 Log (messages-*, dmesg...)</p>
+                <p class="text-muted">自動過濾 Kernel Threads 並偵測所有 Log 檔案</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
@@ -90,65 +90,72 @@
                         <span id="mem-total-badge" class="badge bg-secondary">-- GB</span>
                     </div>
                     <div class="card-body">
-                        <div class="chart-wrapper">
+                        <div style="height: 250px; position: relative;">
                             <canvas id="memChart"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="col-lg-4 col-md-6">
+            <div class="col-lg-8 col-md-6">
                 <div class="card h-100">
-                    <div class="card-header">Top CPU Processes</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Top CPU Processes</span>
+                        <span class="badge bg-info text-dark">Exclude Threads</span>
+                    </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0 small align-middle">
+                            <table class="table table-hover table-proc mb-0">
                                 <thead class="table-light">
                                     <tr>
-                                        <th style="width: 20%">PID</th>
-                                        <th style="width: 25%">User</th>
-                                        <th style="width: 20%">CPU%</th>
-                                        <th>Command</th>
+                                        <th width="10%">PID</th>
+                                        <th width="15%">User</th>
+                                        <th width="10%">CPU%</th>
+                                        <th width="10%">MEM%</th>
+                                        <th width="10%">RSS (MB)</th>
+                                        <th width="45%">Command</th>
                                     </tr>
                                 </thead>
                                 <tbody id="ps-tbody">
-                                    <tr><td colspan="4" class="text-center text-muted py-3">等待分析...</td></tr>
+                                    <tr><td colspan="6" class="text-center text-muted py-4">等待資料解析...</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <div class="col-lg-4 col-md-12">
-                <div class="card h-100">
-                    <div class="card-header">Network Interfaces</div>
-                    <div class="card-body p-0">
-                        <div id="net-list" class="list-group list-group-flush" style="max-height: 290px; overflow-y: auto;"></div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <span>System Logs Analysis</span>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">Network Interfaces</div>
+                    <div class="card-body p-0">
+                        <div id="net-list" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                        <span>System Logs</span>
                         <div class="d-flex gap-2">
-                            <select id="log-selector" class="form-select form-select-sm" style="min-width: 250px;" onchange="renderLog()">
+                            <select id="log-selector" class="form-select form-select-sm" style="width: 250px;" onchange="renderLog()">
                                 <option value="" disabled selected>掃描中...</option>
                             </select>
-                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="關鍵字過濾 (Enter)" style="width: 150px;" onkeyup="filterLog()">
+                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="過濾關鍵字..." style="width: 150px;" onkeyup="filterLog()">
                         </div>
                     </div>
                     <div class="card-body p-0 bg-dark">
-                        <div class="log-container">
-                            <div id="log-viewer" class="log-viewer"></div>
-                        </div>
-                        <div class="bg-secondary text-white px-3 py-1 small d-flex justify-content-between">
-                            <span id="log-status">Ready</span>
-                            <span>顯示最後 2000 行</span>
+                        <div class="log-wrapper">
+                            <div id="log-viewer" class="log-viewer">
+                                <div class="text-center text-muted mt-5 pt-5">請從上方選單選擇 Log 檔案</div>
+                            </div>
+                            <div class="bg-secondary text-white px-3 py-1 small d-flex justify-content-between">
+                                <span id="log-status">Ready</span>
+                                <span>Displaying Last 2000 Lines</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -157,10 +164,7 @@
     </div>
 
     <div class="mt-3">
-        <div class="d-flex justify-content-between">
-            <h6 class="fw-bold text-secondary">系統日誌 (Debug)</h6>
-            <small class="text-muted" style="cursor:pointer" onclick="document.getElementById('console').innerHTML=''">Clear</small>
-        </div>
+        <h6 class="fw-bold text-secondary" style="cursor:pointer" onclick="document.getElementById('console').classList.toggle('d-none')">Debug Console (Click to toggle)</h6>
         <div class="debug-console" id="console"></div>
     </div>
 </div>
@@ -168,15 +172,14 @@
 <script>
     let fileMap = new Map();
     let filePaths = [];
-    let logCache = {}; // Cache for log contents
+    let logCache = {};
 
     function log(msg, type = 'info') {
         const c = document.getElementById('console');
         const d = document.createElement('div');
         d.textContent = `> ${msg}`;
-        if (type === 'err') d.className = 'dbg-err';
-        if (type === 'warn') d.className = 'dbg-warn';
-        if (type === 'debug') d.className = 'dbg-info';
+        if (type === 'err') d.className = 'log-d-err';
+        if (type === 'warn') d.className = 'log-d-warn';
         c.appendChild(d);
         c.scrollTop = c.scrollHeight;
     }
@@ -184,60 +187,51 @@
     async function handleFiles(files) {
         if (files.length === 0) return;
         
-        // UI Reset
         document.getElementById('upload-section').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('console').innerHTML = '';
         logCache = {};
 
-        log(`載入 ${files.length} 個檔案物件...`);
+        log(`Indexing ${files.length} files...`);
+        fileMap.clear(); filePaths = [];
         
-        fileMap.clear();
-        filePaths = [];
         for (let i = 0; i < files.length; i++) {
             const path = files[i].webkitRelativePath;
             fileMap.set(path, files[i]);
             filePaths.push(path);
         }
 
-        log("索引建立完成，開始非同步分析...", "debug");
-
         try {
-            await Promise.all([
-                parseOS(),
-                parseMemory(),
-                parseProcess(),
-                parseNetwork(),
-                initLogSystem() // 新的 Log 系統
-            ]);
-            log("🎉 所有模組執行完畢", "info");
+            await parseOS();
+            await parseMemory();
+            await parseProcess(); // 重點優化
+            await parseNetwork();
+            await initLogSystem(); // 重點優化
+            log("🎉 所有模組解析完畢", "info");
         } catch (e) {
-            log(`❌ 主流程錯誤: ${e.message}`, "err");
+            log(`❌ 全域錯誤: ${e.message}`, "err");
             console.error(e);
         }
     }
 
-    // --- Helpers ---
-    async function findFile(keywords, checkFn = null) {
+    // --- Core Finder ---
+    async function findFile(keywords, checkFn = null, returnPath = false) {
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
-        // Priority 1: sos_commands
+        // 優先搜尋 sos_commands 目錄
         let candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) && p.includes('sos_commands'));
-        // Priority 2: endsWith
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
-        // Priority 3: includes (fuzzy)
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
 
         for (const path of candidates) {
             const content = await readFileText(fileMap.get(path));
             if (!content) continue;
             if (checkFn && !checkFn(content)) continue;
-            log(`讀取: ...${path.slice(-40)}`, 'debug');
-            return content;
+            return returnPath ? { content, path } : content;
         }
         return null;
     }
 
-    // 新增：搜尋所有符合特徵的檔案 (用於 Logs)
+    // Log 專用搜尋器 (支援 Regex)
     function findFilesByRegex(regex) {
         return filePaths.filter(p => regex.test(p) && !p.endsWith('.xz') && !p.endsWith('.gz'));
     }
@@ -293,77 +287,85 @@
                 labels: ['App Used', 'Buff/Cache', 'Free'],
                 datasets: [{ data: [used, buff+cached+slab, free], backgroundColor: ['#dc3545', '#ffc107', '#198754'], borderWidth: 1 }]
             },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
         });
     }
 
+    // --- 核心修正：PS 解析器 ---
     async function parseProcess() {
-        // 重大修正：寬容模式解析 PS
         const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], c => c.includes('PID'));
         const tbody = document.getElementById('ps-tbody');
         tbody.innerHTML = '';
 
         if (!data) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">無 PS 資料</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">無 PS 資料</td></tr>';
             return;
         }
 
         const lines = data.split('\n');
-        log(`PS Parser: 讀取到 ${lines.length} 行`, 'debug');
-
         let procs = [];
-        // 預設欄位 (PID usually 1, CPU usually 2, Command usually last)
-        // ps aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+        let map = { user:0, pid:1, cpu:2, mem:3, rss:5, cmd:10 }; 
         
-        let validCount = 0;
+        // 1. 動態偵測 Header 位置
+        for(let i=0; i<Math.min(lines.length, 50); i++) {
+            const line = lines[i].trim();
+            if(line.includes('PID') && line.includes('CPU')) {
+                const parts = line.split(/\s+/);
+                map.user = parts.indexOf('USER');
+                map.pid = parts.indexOf('PID');
+                map.cpu = parts.findIndex(c => c.includes('CPU'));
+                map.mem = parts.findIndex(c => c.includes('MEM'));
+                map.rss = parts.indexOf('RSS');
+                map.cmd = parts.indexOf('COMMAND');
+                if (map.cmd === -1) map.cmd = parts.indexOf('CMD');
+                if (map.cmd === -1) map.cmd = 10; // Fallback
+                break;
+            }
+        }
+
+        // 2. 解析內容 (過濾 PID 為 - 的 Thread)
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line || line.startsWith('USER') || line.includes('PID')) continue;
 
             const parts = line.split(/\s+/);
-            
-            // 寬容檢查：只要大於 7 個欄位就嘗試解析 (某些 Kernel Thread 欄位很少)
-            if (parts.length < 7) continue;
+            if (parts.length < 8) continue; // 寬容度檢查
 
-            // 簡單推斷
-            const user = parts[0];
-            const pid = parts[1];
-            const cpu = parseFloat(parts[2]);
+            const pid = parts[map.pid];
             
-            // 抓取 Command (從第 10 欄開始往後所有內容)
-            // 如果 parts 長度不夠 11，就抓最後一個
-            const cmdStartIdx = 10; 
-            const cmd = parts.length > cmdStartIdx ? parts.slice(cmdStartIdx).join(' ') : parts[parts.length-1];
+            // **關鍵修正**：如果 PID 是 '-'，代表它是 Thread，我們將其忽略，以顯示 Top Processes
+            if (pid === '-') continue;
 
-            // 排除 Kernel Threads (通常以 [ 開頭) 以聚焦在 User Space
-            // if (cmd.startsWith('[')) continue; 
+            const cpu = parseFloat(parts[map.cpu]);
+            const mem = parseFloat(parts[map.mem]);
+            const rss = parseInt(parts[map.rss]); // in KB usually
+
+            // 抓取完整 Command (包含參數)
+            const cmd = parts.slice(map.cmd).join(' ');
 
             if (!isNaN(cpu)) {
-                procs.push({ user, pid, cpu, cmd });
-                validCount++;
+                procs.push({ user: parts[map.user], pid, cpu, mem, rss, cmd });
             }
         }
 
-        log(`PS Parser: 成功解析 ${validCount} 個行程`, 'debug');
-
-        if (procs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-warning">解析失敗 (格式不符)</td></tr>';
-            return;
-        }
-
-        procs.sort((a,b) => b.cpu - a.cpu).slice(0, 5).forEach(p => {
+        // 3. 排序與顯示 (Top 8)
+        procs.sort((a,b) => b.cpu - a.cpu).slice(0, 8).forEach(p => {
             const row = document.createElement('tr');
+            // RSS KB -> MB
+            const rssMB = (p.rss / 1024).toFixed(1);
+            
             row.innerHTML = `
                 <td><span class="badge bg-light text-dark border">${p.pid}</span></td>
                 <td>${p.user}</td>
                 <td class="fw-bold text-danger">${p.cpu}%</td>
-                <td class="text-truncate" style="max-width: 180px;" title=""></td>
+                <td>${p.mem}%</td>
+                <td>${rssMB}</td>
+                <td class="cmd-col" title="${p.cmd}">${p.cmd}</td>
             `;
-            // 安全插入 Command
-            row.querySelector('.text-truncate').textContent = p.cmd; 
-            row.querySelector('.text-truncate').title = p.cmd;
             tbody.appendChild(row);
         });
+        
+        log(`解析出 ${procs.length} 個主程序 (已過濾 Threads)`, 'info');
     }
 
     async function parseNetwork() {
@@ -384,93 +386,74 @@
         }
     }
 
-    // --- Log System (Fix: Multiple Logs) ---
+    // --- 核心修正：Log System (Log Rotation) ---
     async function initLogSystem() {
         const selector = document.getElementById('log-selector');
         selector.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
 
-        // Regex: 匹配 messages, dmesg, secure, cron 及其輪替檔 (如 messages-20231201)
-        // 排除 .xz 壓縮檔
+        // Regex: 匹配 messages, dmesg, secure, cron, 以及它們的歷史檔 (例如 messages-20251228)
+        // 排除 .xz, .gz 壓縮檔 (純前端無法直接解壓)
         const logPaths = findFilesByRegex(/.*\/(messages|dmesg|secure|cron|boot\.log|yum\.log|dnf\.log)([-\.]\d+)?$/);
         
         if (logPaths.length === 0) {
             log("未找到系統日誌檔", "warn");
-            document.getElementById('log-viewer').innerHTML = '<div class="text-center text-muted mt-5">無日誌資料</div>';
             return;
         }
 
-        // 排序：讓最新的檔案 (通常沒有日期後綴，或日期最新) 排前面
-        logPaths.sort((a, b) => {
-            // 簡單邏輯：越短的名字通常是當前 log (messages vs messages-2023...)
-            if (a.length !== b.length) return a.length - b.length;
-            return a.localeCompare(b);
-        });
-
-        log(`掃描到 ${logPaths.length} 個日誌檔`, "info");
+        // 排序：讓檔名短的 (當前 log) 排前面，日期近的排前面
+        logPaths.sort(); // 簡單字母排序即可把相同類型的排在一起
 
         logPaths.forEach(path => {
-            const fileName = path.split('/').pop(); // 只顯示檔名
+            const fileName = path.split('/').pop();
             const opt = document.createElement('option');
             opt.value = path;
             opt.textContent = fileName;
             selector.appendChild(opt);
         });
+        
+        log(`Log 掃描完成: 找到 ${logPaths.length} 個檔案`, 'info');
     }
 
     async function renderLog() {
         const path = document.getElementById('log-selector').value;
         if (!path) return;
 
-        document.getElementById('log-status').textContent = "Loading...";
+        document.getElementById('log-status').textContent = "讀取中...";
         const viewer = document.getElementById('log-viewer');
         viewer.innerHTML = '';
 
-        // Check Cache
         let content = logCache[path];
         if (!content) {
             const file = fileMap.get(path);
             content = await readFileText(file);
-            logCache[path] = content; // Cache it
-        }
-
-        if (!content) {
-            viewer.textContent = "無法讀取檔案內容";
-            return;
+            logCache[path] = content;
         }
 
         const lines = content.split('\n');
-        // 只取最後 2000 行
-        const tail = lines.slice(-2000);
+        const tail = lines.slice(-2000); // 顯示最後 2000 行
         
-        // Render
         let html = '';
         tail.forEach(line => {
             if (!line.trim()) return;
             let cls = 'log-line';
-            // Highlight keywords
             if (line.match(/error|fail|panic|critical|denied/i)) cls += ' log-err';
             else if (line.match(/warn|alert/i)) cls += ' log-warn';
             
-            // 簡易的時間戳高亮 (假設前幾碼是日期)
-            // 將 HTML 特殊字元轉義以防 XSS
-            const safeLine = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            // 安全轉義 HTML
+            const safeLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             html += `<div class="${cls}">${safeLine}</div>`;
         });
 
         viewer.innerHTML = html;
-        viewer.scrollTop = viewer.scrollHeight; // Scroll to bottom
-        document.getElementById('log-status').textContent = `已載入 ${path.split('/').pop()} (Last ${tail.length} lines)`;
+        viewer.scrollTop = viewer.scrollHeight;
+        document.getElementById('log-status').textContent = `已載入 ${path.split('/').pop()} (共 ${lines.length} 行，顯示最後 ${tail.length} 行)`;
     }
 
     function filterLog() {
         const keyword = document.getElementById('log-search').value.toLowerCase();
         const lines = document.querySelectorAll('.log-line');
         lines.forEach(div => {
-            if (div.textContent.toLowerCase().includes(keyword)) {
-                div.style.display = 'block';
-            } else {
-                div.style.display = 'none';
-            }
+            div.style.display = div.textContent.toLowerCase().includes(keyword) ? 'block' : 'none';
         });
     }
 
