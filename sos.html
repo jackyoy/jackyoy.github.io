@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v8 (Fix)</title>
+    <title>RHEL SOS Analyzer v9 (Final Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <style>
@@ -17,7 +17,7 @@
         .main-content { flex: 1; overflow-y: auto; padding: 25px; }
         .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
         .card-header { font-weight: 600; background: #fff; border-bottom: 1px solid #eee; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
-        .source-badge { font-size: 0.75rem; color: #666; font-weight: normal; font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; }
+        .source-badge { font-size: 0.75rem; color: #fff; background-color: #6c757d; padding: 2px 8px; border-radius: 4px; font-weight: normal; font-family: monospace; }
         
         .console-box { background: #2d2d3b; color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
         
@@ -30,7 +30,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v8</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v9</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統深度評估</a>
@@ -46,7 +46,7 @@
             <div class="upload-box" onclick="document.getElementById('dir-input').click()">
                 <div class="fs-1 mb-2">📂</div>
                 <h4>上傳 SOS Report 資料夾</h4>
-                <p class="text-muted small">支援 webkitdirectory (請選擇解壓後的目錄)</p>
+                <p class="text-muted small">請選擇解壓縮後的資料夾</p>
                 <input type="file" id="dir-input" webkitdirectory directory multiple class="d-none">
             </div>
         </div>
@@ -82,6 +82,13 @@
             <h4 class="mb-3">硬體與系統深度資訊</h4>
             
             <div class="card">
+                <div class="card-header">Middleware Processes <span class="source-badge" id="src-ps-mid">Pending</span></div>
+                <div class="card-body">
+                    <div class="console-box" id="info-middleware">Scanning...</div>
+                </div>
+            </div>
+
+            <div class="card">
                 <div class="card-header">Hardware & BIOS <span class="source-badge" id="src-dmi">Pending</span></div>
                 <div class="card-body">
                     <div class="row">
@@ -91,23 +98,13 @@
                     </div>
                 </div>
             </div>
-
-            <div class="card">
-                <div class="card-header">Middleware Processes <span class="source-badge" id="src-ps-mid">Pending</span></div>
-                <div class="card-body">
-                    <div class="console-box" id="info-middleware">Scanning...</div>
-                </div>
-            </div>
         </div>
 
         <div id="view-network" class="content-view hidden">
              <h4 class="mb-3">網路分析</h4>
              <div class="card">
-                <div class="card-header">Listening Ports <span class="source-badge" id="src-ss">Pending</span></div>
+                <div class="card-header">Listening Ports (Netstat/SS) <span class="source-badge" id="src-ss">Pending</span></div>
                 <div class="card-body">
-                    <div class="alert alert-light border small">
-                        <strong>Logic:</strong> Tries `ss -tulpn` first, falls back to `netstat -neopa`
-                    </div>
                     <div class="console-box" id="net-ss">Searching...</div>
                 </div>
             </div>
@@ -119,7 +116,6 @@
 
         <div id="view-debug" class="content-view hidden">
             <h4>檔案索引檢測 (Debug)</h4>
-            <p class="text-muted">如果資料顯示為空，請檢查下方列表是否包含該檔案 (過濾了 0 byte 的捷徑)。</p>
             <div class="console-box" id="debug-list"></div>
         </div>
 
@@ -131,17 +127,17 @@
             filePaths: [],
             cache: {},
             
-            // 定義正規表達式搜尋規則
+            // 修正後的規則：包含您的特定檔名 ps_auxwwwm 和 netstat
             rules: {
-                ps: [/sos_commands\/process\/ps_auxww$/, /ps_aux$/, /ps_auxww$/], 
-                ss: [/sos_commands\/networking\/ss_-tulpn$/, /ss_-tulpn$/],
-                netstat: [/sos_commands\/networking\/netstat_-W_-neopa$/, /netstat.*neopa$/], // Fallback
-                hostname: [/sos_commands\/host\/hostname$/, /hostname$/],
-                release: [/etc\/redhat-release$/, /redhat-release$/],
-                uptime: [/sos_commands\/host\/uptime$/, /uptime$/],
-                uname: [/sos_commands\/kernel\/uname_-a$/, /uname_-a$/], // 修正 v7 遺失的部分
-                dmidecode: [/sos_commands\/hardware\/dmidecode$/, /dmidecode$/],
-                ip: [/sos_commands\/networking\/ip_-o_addr$/, /ip_addr$/]
+                ps: [/ps_aux.*$/, /ps_auxwwwm$/], // 寬鬆匹配所有 aux 開頭，包含 m
+                netstat: [/netstat.*neopa$/, /netstat.*-W.*$/, /netstat$/], // 匹配 netstat 相關
+                ss: [/ss_-tulpn$/],
+                hostname: [/hostname$/],
+                release: [/redhat-release$/],
+                uptime: [/uptime$/],
+                uname: [/uname_-a$/],
+                dmidecode: [/dmidecode$/],
+                ip: [/ip_.*addr$/]
             }
         };
 
@@ -151,23 +147,18 @@
 
             document.getElementById('loader').classList.remove('hidden');
             
-            // Reset
             App.files.clear();
             App.filePaths = [];
             App.cache = {};
 
-            // Indexing
             let debugLog = "";
             for (let f of fileList) {
-                // 正規化路徑
                 const parts = f.webkitRelativePath.split('/');
-                const relPath = parts.slice(1).join('/'); // 移除第一層資料夾
-                
-                // 排除 0 bytes 的符號連結
+                const relPath = parts.slice(1).join('/'); 
                 if (f.size > 0) {
                     App.files.set(relPath, f);
                     App.filePaths.push(relPath);
-                    debugLog += `[LOADED] ${relPath} (${f.size} B)\n`;
+                    debugLog += `${relPath} (${f.size} B)\n`;
                 }
             }
             document.getElementById('debug-list').textContent = debugLog;
@@ -184,24 +175,21 @@
             }
         });
 
-        // --- 核心搜尋引擎 ---
         async function findAndRead(ruleKey) {
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
 
             let foundPath = null;
-
-            // 嘗試匹配
-            for (let regex of regexList) {
-                const match = App.filePaths.find(p => regex.test(p));
-                if (match) {
-                    foundPath = match;
-                    break;
-                }
+            // 優先找路徑較長且包含 sos_commands 的 (通常是真身)
+            const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
+            if (matches.length > 0) {
+                matches.sort((a, b) => b.length - a.length); // Longest path first
+                // Prefer sos_commands
+                const best = matches.find(m => m.includes('sos_commands')) || matches[0];
+                foundPath = best;
             }
 
             if (foundPath) {
-                console.log(`Matched [${ruleKey}] -> ${foundPath}`);
                 if (!App.cache[foundPath]) {
                     App.cache[foundPath] = await App.files.get(foundPath).text();
                 }
@@ -212,87 +200,80 @@
 
         function showSrc(id, path) {
             const el = document.getElementById(id);
-            if (el) {
-                el.textContent = path ? `SRC: .../${path.split('/').pop()}` : 'Not Found';
-                el.classList.toggle('text-danger', !path);
-            }
+            if (el) el.textContent = path ? `SRC: .../${path.split('/').pop()}` : 'Not Found';
         }
 
-        // --- 解析邏輯 ---
-
         async function runDashboard() {
-            // Hostname
             const h = await findAndRead('hostname');
             if(h.content) document.getElementById('dash-hostname').textContent = h.content.trim();
 
-            // Release
             const r = await findAndRead('release');
             if(r.content) document.getElementById('dash-release').textContent = r.content.split('\n')[0];
 
-            // Uptime
             const u = await findAndRead('uptime');
             if(u.content) document.getElementById('dash-uptime').textContent = u.content.trim();
 
-            // Kernel (Fix: Explicitly check uname)
             const k = await findAndRead('uname');
             if (k.content) {
-                // uname -a output: Linux hostname 4.18.0-xxx ...
                 const parts = k.content.split(' ');
-                // 通常第三個欄位是 kernel version
                 if (parts.length >= 3) document.getElementById('dash-kernel').textContent = parts[2];
                 else document.getElementById('dash-kernel').textContent = k.content;
-            } else {
-                document.getElementById('dash-kernel').textContent = "uname file not found";
             }
         }
 
         async function runHostInfo() {
-            // PS List
+            // PS 解析 (針對您的 ps_auxwwwm 格式)
             const ps = await findAndRead('ps');
             showSrc('src-ps-dash', ps.path);
             showSrc('src-ps-mid', ps.path);
 
             if (ps.content) {
                 const lines = ps.content.split('\n');
-                
-                // Smart Parse: 尋找標頭行 (包含 PID 和 MEM 的行)
                 let headerIndex = -1;
-                for(let i=0; i < Math.min(50, lines.length); i++) {
-                    if (lines[i].includes('PID') && lines[i].includes('%MEM')) {
+                // 找 Header
+                for(let i=0; i<Math.min(50, lines.length); i++) {
+                    if (lines[i].includes('PID') && lines[i].includes('%MEM') && lines[i].includes('COMMAND')) {
                         headerIndex = i;
                         break;
                     }
                 }
 
                 if (headerIndex !== -1) {
-                    const dataLines = lines.slice(headerIndex + 1);
                     const parsed = [];
-                    
-                    dataLines.forEach(line => {
-                        const parts = line.trim().split(/\s+/);
-                        if (parts.length < 10) return;
+                    // 解析 Header 後的每一行
+                    for (let i = headerIndex + 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        const parts = line.split(/\s+/);
                         
-                        // 標準 ps aux 欄位: USER(0) PID(1) %CPU(2) %MEM(3)
+                        // ps auxwwwm 格式: USER PID %CPU %MEM ...
+                        // 您的檔案中有 PID 為 '-' 的行，必須過濾掉
+                        const pidStr = parts[1];
+                        if (pidStr === '-' || isNaN(parseInt(pidStr))) continue;
+
+                        if (parts.length < 10) continue;
+
                         const mem = parseFloat(parts[3]);
                         const cpu = parseFloat(parts[2]);
-                        const cmd = parts.slice(10).join(' '); // 合併指令
+                        const cmd = parts.slice(10).join(' ');
 
                         if (!isNaN(mem)) {
-                            parsed.push({ user: parts[0], pid: parts[1], mem, cpu, cmd });
+                            parsed.push({ user: parts[0], pid: pidStr, mem, cpu, cmd });
                         }
-                    });
+                    }
 
-                    // Sort
+                    // Top 5 Memory
                     const top5 = parsed.sort((a, b) => b.mem - a.mem).slice(0, 5);
                     document.getElementById('mem-table-body').innerHTML = top5.map(p => 
                         `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td>${p.cpu}%</td><td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td></tr>`
                     ).join('');
 
                     // Middleware
-                    const mw = parsed.filter(p => p.cmd.match(/java|python|node|httpd|nginx|mysql|postgres|docker|kube/i) && !p.cmd.includes(' grep '));
-                    document.getElementById('info-middleware').textContent = mw.length ? mw.map(p => `${p.user} (${p.pid}): ${p.cmd}`).join('\n') : "No middleware found";
+                    const mwRegex = /java|python|node|httpd|nginx|mysql|postgres|docker|kube/i;
+                    const mw = parsed.filter(p => mwRegex.test(p.cmd) && !p.cmd.includes(' grep '));
+                    document.getElementById('info-middleware').textContent = mw.length ? mw.map(p => `${p.user} (${p.pid}): ${p.cmd}`).join('\n') : "No common middleware found.";
                 } else {
-                    document.getElementById('mem-table-body').innerHTML = "<tr><td colspan='5'>Cannot find PID/MEM header in ps file</td></tr>";
+                    document.getElementById('mem-table-body').innerHTML = "<tr><td colspan='5'>Header not found in PS file</td></tr>";
                 }
             }
 
@@ -303,7 +284,6 @@
                 const prod = (dmi.content.match(/Product Name:\s*(.+)/) || [])[1];
                 const vend = (dmi.content.match(/Manufacturer:\s*(.+)/) || [])[1];
                 const bios = (dmi.content.match(/Version:\s*(.+)/) || [])[1];
-                
                 if(prod) document.getElementById('info-model').textContent = prod;
                 if(vend) document.getElementById('info-vendor').textContent = vend;
                 if(bios) document.getElementById('info-bios').textContent = bios;
@@ -311,34 +291,36 @@
         }
 
         async function runNetwork() {
-            // Logic: Try SS -> Fail -> Try Netstat
-            let netFile = await findAndRead('ss');
-            let type = 'ss';
+            // 優先找 Netstat (因為您的報告中主要是這個)
+            let net = await findAndRead('netstat');
+            let source = "netstat";
             
-            if (!netFile.content) {
-                console.log("SS not found, trying Netstat...");
-                netFile = await findAndRead('netstat');
-                type = 'netstat';
+            // 如果沒找到，才試試看 SS
+            if (!net.content) {
+                net = await findAndRead('ss');
+                source = "ss";
             }
 
-            showSrc('src-ss', netFile.path);
-            
-            if (netFile.content) {
-                let text = netFile.content;
-                // Netstat cleanup: remove first 2 lines usually
-                if (type === 'netstat' && text.includes('Active Internet connections')) {
-                    // 簡單過濾一下，只顯示 LISTEN 狀態
-                    const lines = text.split('\n');
-                    const listenLines = lines.filter(l => l.includes('LISTEN') || l.includes('Proto'));
-                    document.getElementById('net-ss').textContent = listenLines.join('\n');
+            showSrc('src-ss', net.path);
+
+            if (net.content) {
+                const lines = net.content.split('\n');
+                let output = "";
+                
+                if (source === 'netstat') {
+                    // Netstat 解析：只顯示 LISTEN
+                    // 格式：Proto Recv-Q Send-Q Local Address ... State ... PID/Program
+                    output = lines.filter(l => l.includes('Proto') || l.includes('LISTEN')).join('\n');
                 } else {
-                    document.getElementById('net-ss').textContent = text;
+                    // SS 解析
+                    output = lines.filter(l => l.includes('State') || l.includes('LISTEN')).join('\n');
                 }
+                
+                document.getElementById('net-ss').textContent = output || "No LISTEN ports found.";
             } else {
-                document.getElementById('net-ss').textContent = "Neither 'ss -tulpn' nor 'netstat' found.";
+                document.getElementById('net-ss').textContent = "Netstat/SS log not found.";
             }
 
-            // IP
             const ip = await findAndRead('ip');
             showSrc('src-ip', ip.path);
             if(ip.content) document.getElementById('net-ip').textContent = ip.content;
@@ -348,7 +330,6 @@
             document.querySelectorAll('.content-view').forEach(e => e.classList.add('hidden'));
             document.getElementById('view-'+id).classList.remove('hidden');
             document.querySelectorAll('.nav-link').forEach(e => e.classList.remove('active'));
-            // Fuzzy match active nav
             const navs = document.querySelectorAll('.nav-link');
             for(let n of navs) {
                 if(n.getAttribute('onclick').includes(id)) n.classList.add('active');
