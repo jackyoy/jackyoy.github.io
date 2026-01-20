@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v13 (RHEL 8/9 Fix)</title>
+    <title>RHEL SOS Analyzer v14 (Strict Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -29,7 +29,7 @@
         .sortable-th { cursor: pointer; user-select: none; }
         .sortable-th:hover { background-color: #e9ecef; }
         .sort-icon { font-size: 0.8em; margin-left: 5px; color: #999; }
-        
+
         /* Log Tree */
         .log-container { display: flex; height: calc(100vh - 120px); gap: 15px; border: 1px solid #ddd; background: #fff; border-radius: 8px; overflow: hidden; }
         .log-tree { width: 30%; background: #f8f9fa; border-right: 1px solid #ddd; overflow-y: auto; font-size: 0.9rem; }
@@ -45,7 +45,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v13</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v14</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -120,7 +120,6 @@
                     <div class="btn-group btn-group-sm" role="group">
                         <input type="radio" class="btn-check" name="net-source" id="btn-netstat" autocomplete="off" onchange="renderNetwork('netstat')">
                         <label class="btn btn-outline-secondary" for="btn-netstat">Netstat</label>
-
                         <input type="radio" class="btn-check" name="net-source" id="btn-ss" autocomplete="off" onchange="renderNetwork('ss')">
                         <label class="btn btn-outline-secondary" for="btn-ss">SS</label>
                     </div>
@@ -200,21 +199,20 @@
         const App = {
             files: new Map(), filePaths: [], cache: {}, 
             currentLogText: "", fullSysctlText: "", processList: [], memChart: null,
-            netData: { ss: null, netstat: null }, // Store raw network data
+            netData: { ss: null, netstat: null }, 
 
-            // 修正：針對 RHEL 8/9 的檔名變異與排除路由表
+            // 修正規則：IP 增加更多變體，Netstat 移除不必要的
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                // Netstat: 優先找 neopa/pan (port lists), 避免 -r (routing)
                 netstat: [/netstat.*neopa$/, /netstat.*pan$/, /netstat_-W_-neopa$/, /netstat$/],
-                // SS: 優先找 tulpn
                 ss: [/ss_-tulpn$/, /ss_-.*ua.*$/, /ss$/],
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
                 uname: [/uname_-a$/],
                 dmidecode: [/dmidecode$/],
-                ip: [/ip_.*addr$/],
+                // 擴充 IP 搜尋規則
+                ip: [/sos_commands\/networking\/ip_-o_addr$/, /ip_-o_addr$/, /ip_addr$/, /ip_address$/, /ip_a$/, /ifconfig$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
                 free: [/sos_commands\/memory\/free$/, /free$/],
@@ -290,7 +288,6 @@
 
         async function startAnalysis() {
             try {
-                // Debug Log
                 let log = "--- Loaded Files ---\n";
                 App.filePaths.forEach(p => log += p + "\n");
                 document.getElementById('debug-list').textContent = log;
@@ -308,53 +305,45 @@
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
             
-            // 優先尋找符合 regex 的路徑
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length === 0) return { content: null, path: null };
             
-            // 排序：路徑長的通常是 sos_commands 深層目錄，優先權較高
             matches.sort((a, b) => b.length - a.length);
             
-            // 嘗試讀取並驗證內容
             for (let path of matches) {
-                // 優先選擇 sos_commands 目錄下的檔案
                 if (matches.find(m => m.includes('sos_commands')) && !path.includes('sos_commands')) continue;
-
                 if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
                 const content = App.cache[path];
-
-                // 如果有驗證函式，確保內容不是空的或錯誤的 (例如 routing table 被誤判為 port list)
                 if (validateFn && !validateFn(content)) continue;
-
                 return { content, path };
             }
             
-            // Fallback: 如果驗證都失敗，回傳第一個
             const fallback = matches[0];
             if (!App.cache[fallback]) App.cache[fallback] = await App.files.get(fallback).text();
             return { content: App.cache[fallback], path: fallback };
         }
 
-        // --- Network Analysis (Fixed) ---
+        // --- Network Analysis (Strict Fix) ---
         async function runNetwork() {
-            // 驗證函式：確保檔案看起來像 Port 列表，而不是 Routing Table
+            // 嚴格驗證：排除 virsh dominfo (含有 Id, UUID)
+            // 必須包含網路相關關鍵字
             const isValidPortList = (text) => {
-                return text.includes('Proto') || text.includes('State') || text.includes('LISTEN') || text.includes('ESTAB');
+                // Virsh check: 如果含有 OS Type 和 UUID 則一定是 VM Info，直接排除
+                if (text.includes('OS Type:') && text.includes('UUID:') && text.includes('Id:')) return false;
+                
+                // 正向檢查：Netstat/SS 必須有的特徵
+                const hasHeader = text.includes('Proto') || text.includes('State') || text.includes('Recv-Q') || text.includes('Netid');
+                const hasStates = text.includes('LISTEN') || text.includes('ESTAB') || text.includes('UNCONN');
+                
+                return hasHeader && hasStates;
             };
 
-            // 1. Try Find Netstat (RHEL 8 preferred)
             const net = await findAndRead('netstat', isValidPortList);
-            if (net.content && isValidPortList(net.content)) {
-                App.netData.netstat = { content: net.content, path: net.path };
-            }
+            if (net.content) App.netData.netstat = { content: net.content, path: net.path };
 
-            // 2. Try Find SS
             const ss = await findAndRead('ss', isValidPortList);
-            if (ss.content && isValidPortList(ss.content)) {
-                App.netData.ss = { content: ss.content, path: ss.path };
-            }
+            if (ss.content) App.netData.ss = { content: ss.content, path: ss.path };
 
-            // 3. Decide what to show default
             if (App.netData.netstat) {
                 document.getElementById('btn-netstat').checked = true;
                 renderNetwork('netstat');
@@ -362,40 +351,30 @@
                 document.getElementById('btn-ss').checked = true;
                 renderNetwork('ss');
             } else {
-                document.getElementById('net-ss').textContent = "No valid 'ss' or 'netstat' output found.";
+                document.getElementById('net-ss').textContent = "No valid 'ss' or 'netstat' output found (Verified).";
                 showSrc('src-ss', null);
             }
+
+            // IP Analysis (Enhanced)
+            const ip = await findAndRead('ip');
+            showSrc('src-ip', ip.path);
+            if (ip.content) document.getElementById('net-ip').textContent = ip.content;
+            else document.getElementById('net-ip').textContent = "IP info not found.";
         }
 
         window.renderNetwork = function(type) {
             const data = App.netData[type];
-            if (!data) {
-                document.getElementById('net-ss').textContent = "Data not available for " + type;
-                return;
-            }
+            if (!data) { document.getElementById('net-ss').textContent = "Data not available"; return; }
             showSrc('src-ss', data.path);
-            
             const lines = data.content.split('\n');
             let output = "";
-            
             if (type === 'netstat') {
-                // Netstat filter
-                // Header contains 'Proto', Ports usually 'LISTEN' or 'ESTABLISHED'
                 const headers = lines.filter(l => l.includes('Proto'));
-                const content = lines.filter(l => l.includes('LISTEN') || l.includes('UDP')); 
-                // UDP sometimes doesn't say LISTEN in old netstat, so we include it broadly or just LISTEN
-                // RHEL 8 netstat usually has LISTEN.
                 output = [...headers, ...lines.filter(l => l.includes('LISTEN') || (l.includes('udp') && !l.includes('ESTAB')))].join('\n');
             } else {
-                // SS Filter
                 output = lines.filter(l => l.includes('State') || l.includes('LISTEN')).join('\n');
             }
-            
-            // If filtering killed everything, show raw header + first few lines
-            if (output.length < 50) {
-                 output = lines.slice(0, 50).join('\n'); // Fallback to raw
-            }
-
+            if (output.length < 50) output = lines.slice(0, 50).join('\n');
             document.getElementById('net-ss').textContent = output;
         };
 
