@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v10 (Process & Logs Fix)</title>
+    <title>RHEL SOS Analyzer v11 (Network Details)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --bg-dark: #212529; --accent: #0d6efd; }
         body { background-color: #f8f9fa; font-family: 'Segoe UI', Roboto, monospace; color: #333; }
         
-        /* 儀表板卡片 */
+        /* 卡片優化 */
         .card { border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 8px; margin-bottom: 24px; }
         .card-header { background: #fff; border-bottom: 2px solid #f1f3f5; font-weight: 700; color: #495057; padding: 15px; }
         
@@ -25,11 +26,16 @@
         .log-err { color: #ff8787; font-weight: bold; background: rgba(255,0,0,0.1); }
         .log-warn { color: #ffd43b; font-weight: bold; }
         
-        /* 表格優化 */
-        .table-proc th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-        .table-proc td { vertical-align: middle; }
-        .cmd-col { max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        
+        /* Network List */
+        .net-item { cursor: pointer; transition: background-color 0.2s; }
+        .net-item:hover { background-color: #f8f9fa; }
+        .net-item:active { background-color: #e9ecef; }
+
+        /* Modal */
+        .modal-body code { color: #d63384; }
+        .detail-row { border-bottom: 1px solid #eee; padding: 8px 0; }
+        .detail-label { font-weight: bold; color: #555; width: 80px; display: inline-block; }
+
         /* Debug Console */
         .debug-console { background: #000; color: #20c997; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 6px; height: 150px; overflow-y: auto; margin-top: 20px; }
         .log-d-err { color: #fa5252; } .log-d-warn { color: #fab005; }
@@ -40,8 +46,8 @@
 <div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer <span class="badge bg-secondary fs-6 align-middle">v10.0</span></h3>
-            <small class="text-muted">支援 ps_auxwwwm 解析與歷史 Log 輪替檔</small>
+            <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer <span class="badge bg-secondary fs-6 align-middle">v11.0</span></h3>
+            <small class="text-muted">新增：網路介面詳細資訊檢視器</small>
         </div>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重置</button>
     </div>
@@ -51,7 +57,7 @@
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
                 <div class="display-4 mb-3">📂</div>
                 <h4>選擇 sosreport 資料夾</h4>
-                <p class="text-muted">自動過濾 Kernel Threads 並偵測所有 Log 檔案</p>
+                <p class="text-muted">本機解析，不需上傳</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
@@ -101,7 +107,7 @@
                 <div class="card h-100">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Top CPU Processes</span>
-                        <span class="badge bg-info text-dark">Exclude Threads</span>
+                        <span class="badge bg-info text-dark">Main Processes Only</span>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -129,7 +135,7 @@
         <div class="row">
             <div class="col-md-4">
                 <div class="card h-100">
-                    <div class="card-header">Network Interfaces</div>
+                    <div class="card-header">Network Interfaces <small class="text-muted fw-normal ms-2">(Click for details)</small></div>
                     <div class="card-body p-0">
                         <div id="net-list" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;"></div>
                     </div>
@@ -144,7 +150,7 @@
                             <select id="log-selector" class="form-select form-select-sm" style="width: 250px;" onchange="renderLog()">
                                 <option value="" disabled selected>掃描中...</option>
                             </select>
-                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="過濾關鍵字..." style="width: 150px;" onkeyup="filterLog()">
+                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="關鍵字過濾..." style="width: 150px;" onkeyup="filterLog()">
                         </div>
                     </div>
                     <div class="card-body p-0 bg-dark">
@@ -169,10 +175,27 @@
     </div>
 </div>
 
+<div class="modal fade" id="netDetailModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="modal-title">Interface Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     let fileMap = new Map();
     let filePaths = [];
     let logCache = {};
+    let networkData = {}; // 儲存詳細網路資訊
 
     function log(msg, type = 'info') {
         const c = document.getElementById('console');
@@ -191,6 +214,7 @@
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('console').innerHTML = '';
         logCache = {};
+        networkData = {};
 
         log(`Indexing ${files.length} files...`);
         fileMap.clear(); filePaths = [];
@@ -204,20 +228,19 @@
         try {
             await parseOS();
             await parseMemory();
-            await parseProcess(); // 重點優化
-            await parseNetwork();
-            await initLogSystem(); // 重點優化
-            log("🎉 所有模組解析完畢", "info");
+            await parseProcess(); 
+            await parseNetwork(); // 重點升級
+            await initLogSystem();
+            log("🎉 解析完畢", "info");
         } catch (e) {
-            log(`❌ 全域錯誤: ${e.message}`, "err");
+            log(`❌ 錯誤: ${e.message}`, "err");
             console.error(e);
         }
     }
 
-    // --- Core Finder ---
+    // --- Helpers ---
     async function findFile(keywords, checkFn = null, returnPath = false) {
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
-        // 優先搜尋 sos_commands 目錄
         let candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) && p.includes('sos_commands'));
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
@@ -231,7 +254,6 @@
         return null;
     }
 
-    // Log 專用搜尋器 (支援 Regex)
     function findFilesByRegex(regex) {
         return filePaths.filter(p => regex.test(p) && !p.endsWith('.xz') && !p.endsWith('.gz'));
     }
@@ -287,26 +309,21 @@
                 labels: ['App Used', 'Buff/Cache', 'Free'],
                 datasets: [{ data: [used, buff+cached+slab, free], backgroundColor: ['#dc3545', '#ffc107', '#198754'], borderWidth: 1 }]
             },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
         });
     }
 
-    // --- 核心修正：PS 解析器 ---
     async function parseProcess() {
         const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], c => c.includes('PID'));
         const tbody = document.getElementById('ps-tbody');
         tbody.innerHTML = '';
 
-        if (!data) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">無 PS 資料</td></tr>';
-            return;
-        }
+        if (!data) { tbody.innerHTML = '<tr><td colspan="6" class="text-center">No PS Data</td></tr>'; return; }
 
         const lines = data.split('\n');
         let procs = [];
         let map = { user:0, pid:1, cpu:2, mem:3, rss:5, cmd:10 }; 
         
-        // 1. 動態偵測 Header 位置
         for(let i=0; i<Math.min(lines.length, 50); i++) {
             const line = lines[i].trim();
             if(line.includes('PID') && line.includes('CPU')) {
@@ -318,42 +335,31 @@
                 map.rss = parts.indexOf('RSS');
                 map.cmd = parts.indexOf('COMMAND');
                 if (map.cmd === -1) map.cmd = parts.indexOf('CMD');
-                if (map.cmd === -1) map.cmd = 10; // Fallback
+                if (map.cmd === -1) map.cmd = 10; 
                 break;
             }
         }
 
-        // 2. 解析內容 (過濾 PID 為 - 的 Thread)
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line || line.startsWith('USER') || line.includes('PID')) continue;
-
             const parts = line.split(/\s+/);
-            if (parts.length < 8) continue; // 寬容度檢查
-
-            const pid = parts[map.pid];
+            if (parts.length < 8) continue;
             
-            // **關鍵修正**：如果 PID 是 '-'，代表它是 Thread，我們將其忽略，以顯示 Top Processes
-            if (pid === '-') continue;
+            const pid = parts[map.pid];
+            if (pid === '-') continue; // Filter threads
 
             const cpu = parseFloat(parts[map.cpu]);
             const mem = parseFloat(parts[map.mem]);
-            const rss = parseInt(parts[map.rss]); // in KB usually
-
-            // 抓取完整 Command (包含參數)
+            const rss = parseInt(parts[map.rss]); 
             const cmd = parts.slice(map.cmd).join(' ');
 
-            if (!isNaN(cpu)) {
-                procs.push({ user: parts[map.user], pid, cpu, mem, rss, cmd });
-            }
+            if (!isNaN(cpu)) procs.push({ user: parts[map.user], pid, cpu, mem, rss, cmd });
         }
 
-        // 3. 排序與顯示 (Top 8)
         procs.sort((a,b) => b.cpu - a.cpu).slice(0, 8).forEach(p => {
             const row = document.createElement('tr');
-            // RSS KB -> MB
             const rssMB = (p.rss / 1024).toFixed(1);
-            
             row.innerHTML = `
                 <td><span class="badge bg-light text-dark border">${p.pid}</span></td>
                 <td>${p.user}</td>
@@ -364,35 +370,100 @@
             `;
             tbody.appendChild(row);
         });
-        
-        log(`解析出 ${procs.length} 個主程序 (已過濾 Threads)`, 'info');
     }
 
+    // --- 網路升級：區塊解析與互動 ---
     async function parseNetwork() {
         const data = await findFile(['ip_address', 'ip_addr', 'ip_-d_address'], c => c.includes('state'));
         const list = document.getElementById('net-list');
         list.innerHTML = '';
+        
         if (!data) return;
 
-        const regex = /^\d+:\s+([^:]+):.*state\s+(\w+)/gm;
-        let match;
-        while ((match = regex.exec(data)) !== null) {
-            const isUp = match[2] === 'UP';
-            list.innerHTML += `
-                <div class="list-group-item d-flex justify-content-between align-items-center py-2">
-                    <span class="fw-bold">${match[1]}</span>
-                    <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${match[2]}</span>
-                </div>`;
-        }
+        // 利用正規表達式將每個介面切分成獨立區塊
+        // ^\d+: 匹配行首的 "1: lo: ..."
+        const interfaces = data.split(/^\d+:\s+/m).filter(Boolean);
+        
+        interfaces.forEach((block, index) => {
+            // 第一行通常包含 Name, Flags, MTU, State
+            const lines = block.split('\n');
+            const header = lines[0];
+            
+            const nameMatch = header.match(/^([^:]+):/);
+            const name = nameMatch ? nameMatch[1].trim() : `iface-${index}`;
+            
+            // 解析 State
+            const stateMatch = header.match(/state\s+(\w+)/);
+            const state = stateMatch ? stateMatch[1] : 'UNKNOWN';
+            
+            // 解析 MTU
+            const mtuMatch = header.match(/mtu\s+(\d+)/);
+            const mtu = mtuMatch ? mtuMatch[1] : 'N/A';
+
+            // 解析 MAC
+            const macMatch = block.match(/link\/ether\s+([0-9a-f:]{17})/);
+            const mac = macMatch ? macMatch[1] : 'N/A';
+
+            // 解析 IPs (IPv4 & IPv6)
+            const ipv4s = [...block.matchAll(/inet\s+([0-9./]+)/g)].map(m => m[1]);
+            const ipv6s = [...block.matchAll(/inet6\s+([0-9a-f:/]+)/g)].map(m => m[1]);
+
+            // 解析 Flags (<BROADCAST,MULTICAST...>)
+            const flagsMatch = header.match(/<([^>]+)>/);
+            const flags = flagsMatch ? flagsMatch[1] : '';
+
+            // 儲存至全域物件以便 Modal 使用
+            networkData[name] = { state, mtu, mac, ipv4s, ipv6s, flags };
+
+            // Render List Item
+            const isUp = state === 'UP';
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex justify-content-between align-items-center net-item px-3 py-2';
+            item.onclick = () => showNetDetail(name);
+            item.innerHTML = `
+                <div>
+                    <span class="fw-bold">${name}</span>
+                    <small class="text-muted d-block" style="font-size: 0.75rem">${mac}</small>
+                </div>
+                <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${state}</span>
+            `;
+            list.appendChild(item);
+        });
     }
 
-    // --- 核心修正：Log System (Log Rotation) ---
+    function showNetDetail(name) {
+        const data = networkData[name];
+        if (!data) return;
+
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        
+        modalTitle.textContent = `${name} Details`;
+        
+        let ipHtml = '';
+        if (data.ipv4s.length > 0) ipHtml += data.ipv4s.map(ip => `<div><code>${ip}</code> (IPv4)</div>`).join('');
+        if (data.ipv6s.length > 0) ipHtml += data.ipv6s.map(ip => `<div><code>${ip}</code> (IPv6)</div>`).join('');
+        if (ipHtml === '') ipHtml = '<span class="text-muted">No IP Address assigned</span>';
+
+        modalBody.innerHTML = `
+            <div class="detail-row"><span class="detail-label">State:</span> <span class="badge ${data.state==='UP'?'bg-success':'bg-secondary'}">${data.state}</span></div>
+            <div class="detail-row"><span class="detail-label">MAC:</span> <code>${data.mac}</code></div>
+            <div class="detail-row"><span class="detail-label">MTU:</span> ${data.mtu}</div>
+            <div class="detail-row"><span class="detail-label">Flags:</span> <small class="text-muted">${data.flags}</small></div>
+            <div class="mt-3">
+                <span class="detail-label mb-2 d-block">IP Addresses:</span>
+                <div class="ps-2 border-start border-3">${ipHtml}</div>
+            </div>
+        `;
+
+        new bootstrap.Modal(document.getElementById('netDetailModal')).show();
+    }
+
+    // --- Log System ---
     async function initLogSystem() {
         const selector = document.getElementById('log-selector');
         selector.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
 
-        // Regex: 匹配 messages, dmesg, secure, cron, 以及它們的歷史檔 (例如 messages-20251228)
-        // 排除 .xz, .gz 壓縮檔 (純前端無法直接解壓)
         const logPaths = findFilesByRegex(/.*\/(messages|dmesg|secure|cron|boot\.log|yum\.log|dnf\.log)([-\.]\d+)?$/);
         
         if (logPaths.length === 0) {
@@ -400,8 +471,7 @@
             return;
         }
 
-        // 排序：讓檔名短的 (當前 log) 排前面，日期近的排前面
-        logPaths.sort(); // 簡單字母排序即可把相同類型的排在一起
+        logPaths.sort(); 
 
         logPaths.forEach(path => {
             const fileName = path.split('/').pop();
@@ -410,8 +480,6 @@
             opt.textContent = fileName;
             selector.appendChild(opt);
         });
-        
-        log(`Log 掃描完成: 找到 ${logPaths.length} 個檔案`, 'info');
     }
 
     async function renderLog() {
@@ -430,7 +498,7 @@
         }
 
         const lines = content.split('\n');
-        const tail = lines.slice(-2000); // 顯示最後 2000 行
+        const tail = lines.slice(-2000); 
         
         let html = '';
         tail.forEach(line => {
@@ -439,14 +507,13 @@
             if (line.match(/error|fail|panic|critical|denied/i)) cls += ' log-err';
             else if (line.match(/warn|alert/i)) cls += ' log-warn';
             
-            // 安全轉義 HTML
             const safeLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             html += `<div class="${cls}">${safeLine}</div>`;
         });
 
         viewer.innerHTML = html;
         viewer.scrollTop = viewer.scrollHeight;
-        document.getElementById('log-status').textContent = `已載入 ${path.split('/').pop()} (共 ${lines.length} 行，顯示最後 ${tail.length} 行)`;
+        document.getElementById('log-status').textContent = `Loaded ${path.split('/').pop()} (${lines.length} lines)`;
     }
 
     function filterLog() {
