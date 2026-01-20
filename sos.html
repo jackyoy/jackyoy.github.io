@@ -3,54 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v8 (Log Analysis)</title>
+    <title>RHEL SOS Analyzer v9 (Multi-Log & Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, sans-serif; color: #212529; }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333; }
         
-        /* 卡片與佈局 */
-        .card { border: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-radius: 8px; margin-bottom: 24px; transition: transform 0.2s; }
-        .card:hover { transform: translateY(-2px); }
-        .card-header { background: #fff; border-bottom: 1px solid #eee; font-weight: 700; color: #495057; padding: 15px 20px; }
+        /* 介面優化 */
+        .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 24px; border-radius: 8px; }
+        .card-header { background-color: #fff; border-bottom: 2px solid #f1f3f5; font-weight: 700; color: #495057; padding: 16px; }
+        .card-body { padding: 20px; }
         
-        /* 上傳區 */
-        .upload-area { border: 2px dashed #adb5bd; border-radius: 12px; padding: 50px; text-align: center; background: #fff; cursor: pointer; transition: 0.3s; }
-        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; }
+        /* 上傳區塊 */
+        .upload-area { border: 2px dashed #ced4da; border-radius: 12px; padding: 40px; text-align: center; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .upload-area:hover { border-color: #0d6efd; background-color: #f8fbff; transform: scale(1.01); }
         
-        /* Log Viewer 樣式 */
-        .log-viewer { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas', monospace; font-size: 0.85rem; height: 400px; overflow-y: auto; padding: 15px; border-radius: 6px; white-space: pre-wrap; line-height: 1.5; }
-        .log-line { display: block; border-bottom: 1px solid #333; padding: 2px 0; }
-        .log-line:hover { background-color: #2a2d2e; }
-        .log-date { color: #569cd6; margin-right: 10px; }
-        .log-process { color: #4ec9b0; margin-right: 10px; }
-        .log-error { color: #f44336; font-weight: bold; }
-        .log-warn { color: #ffc107; font-weight: bold; }
+        /* Log Viewer */
+        .log-container { background: #212529; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; height: 500px; }
+        .log-viewer { flex: 1; overflow-y: auto; padding: 15px; font-family: 'Consolas', monospace; font-size: 0.85rem; color: #e9ecef; white-space: pre-wrap; }
+        .log-line { border-bottom: 1px solid #343a40; padding: 2px 0; }
+        .log-line:hover { background-color: #343a40; }
+        .log-err { color: #ff6b6b; font-weight: bold; background: rgba(255, 107, 107, 0.1); }
+        .log-warn { color: #fcc419; font-weight: bold; }
+        .log-date { color: #4dabf7; margin-right: 8px; }
 
-        /* 除錯區 */
-        .debug-console { background: #000; color: #0f0; font-family: monospace; font-size: 0.75rem; padding: 10px; border-radius: 4px; height: 150px; overflow-y: auto; margin-top: 10px; }
-        
-        /* Chart Container */
-        .chart-container { position: relative; height: 220px; width: 100%; display: flex; justify-content: center; }
+        /* Debug Console */
+        .debug-console { background: #000; color: #2ecc71; font-family: monospace; font-size: 0.75rem; padding: 15px; border-radius: 8px; height: 200px; overflow-y: auto; margin-top: 20px; }
+        .dbg-err { color: #fa5252; } .dbg-warn { color: #fab005; } .dbg-info { color: #adb5bd; }
+
+        /* Chart */
+        .chart-wrapper { position: relative; height: 250px; width: 100%; display: flex; justify-content: center; }
     </style>
 </head>
 <body>
 
-<div class="container py-4">
+<div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h3 class="fw-bold text-primary mb-0">RHEL SOS Analyzer</h3>
-            <small class="text-muted">v8.0 (Logs + Process Fix)</small>
+            <small class="text-muted">v9.0 (支援多重 Log 與 Process 解析修復)</small>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">清除重置</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">重新載入</button>
     </div>
 
     <div class="row justify-content-center" id="upload-section">
         <div class="col-md-8">
             <div class="upload-area" onclick="document.getElementById('folderInput').click()">
                 <div class="display-4 mb-3">📂</div>
-                <h4>載入 sosreport 資料夾</h4>
-                <p class="text-muted">本機運算，支援 Log 分析與 Process 詳細列表</p>
+                <h4>選擇 sosreport 資料夾</h4>
+                <p class="text-muted">將自動掃描所有歷史 Log (messages-*, dmesg...)</p>
                 <input type="file" id="folderInput" webkitdirectory multiple style="display: none" onchange="handleFiles(this.files)">
             </div>
         </div>
@@ -89,7 +90,7 @@
                         <span id="mem-total-badge" class="badge bg-secondary">-- GB</span>
                     </div>
                     <div class="card-body">
-                        <div class="chart-container">
+                        <div class="chart-wrapper">
                             <canvas id="memChart"></canvas>
                         </div>
                     </div>
@@ -101,16 +102,18 @@
                     <div class="card-header">Top CPU Processes</div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0 small" style="table-layout: fixed;">
+                            <table class="table table-hover mb-0 small align-middle">
                                 <thead class="table-light">
                                     <tr>
                                         <th style="width: 20%">PID</th>
                                         <th style="width: 25%">User</th>
                                         <th style="width: 20%">CPU%</th>
-                                        <th style="width: 35%">Command</th>
+                                        <th>Command</th>
                                     </tr>
                                 </thead>
-                                <tbody id="ps-tbody"></tbody>
+                                <tbody id="ps-tbody">
+                                    <tr><td colspan="4" class="text-center text-muted py-3">等待分析...</td></tr>
+                                </tbody>
                             </table>
                         </div>
                     </div>
@@ -121,7 +124,7 @@
                 <div class="card h-100">
                     <div class="card-header">Network Interfaces</div>
                     <div class="card-body p-0">
-                        <div id="net-list" class="list-group list-group-flush" style="max-height: 260px; overflow-y: auto;"></div>
+                        <div id="net-list" class="list-group list-group-flush" style="max-height: 290px; overflow-y: auto;"></div>
                     </div>
                 </div>
             </div>
@@ -130,18 +133,22 @@
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>System Logs Analysis (Last 1000 lines)</span>
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span>System Logs Analysis</span>
                         <div class="d-flex gap-2">
-                            <select id="log-selector" class="form-select form-select-sm" style="width: 200px;" onchange="renderLog()">
-                                <option value="" disabled selected>選擇 Log 檔案...</option>
+                            <select id="log-selector" class="form-select form-select-sm" style="min-width: 250px;" onchange="renderLog()">
+                                <option value="" disabled selected>掃描中...</option>
                             </select>
-                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="過濾關鍵字 (如: error)..." style="width: 200px;" onkeyup="filterLog()">
+                            <input type="text" id="log-search" class="form-control form-control-sm" placeholder="關鍵字過濾 (Enter)" style="width: 150px;" onkeyup="filterLog()">
                         </div>
                     </div>
-                    <div class="card-body p-0">
-                        <div id="log-viewer" class="log-viewer">
-                            <div class="text-center text-muted mt-5">請從右上角選擇要檢視的 Log 檔案</div>
+                    <div class="card-body p-0 bg-dark">
+                        <div class="log-container">
+                            <div id="log-viewer" class="log-viewer"></div>
+                        </div>
+                        <div class="bg-secondary text-white px-3 py-1 small d-flex justify-content-between">
+                            <span id="log-status">Ready</span>
+                            <span>顯示最後 2000 行</span>
                         </div>
                     </div>
                 </div>
@@ -149,24 +156,29 @@
         </div>
     </div>
 
-    <div class="mt-2">
-        <small class="text-muted" onclick="document.getElementById('console').style.display='block'" style="cursor:pointer">Show Debug Log</small>
-        <div class="debug-console" id="console" style="display:none;"></div>
+    <div class="mt-3">
+        <div class="d-flex justify-content-between">
+            <h6 class="fw-bold text-secondary">系統日誌 (Debug)</h6>
+            <small class="text-muted" style="cursor:pointer" onclick="document.getElementById('console').innerHTML=''">Clear</small>
+        </div>
+        <div class="debug-console" id="console"></div>
     </div>
 </div>
 
 <script>
     let fileMap = new Map();
     let filePaths = [];
-    let loadedLogs = {}; // Cache logs
+    let logCache = {}; // Cache for log contents
 
     function log(msg, type = 'info') {
         const c = document.getElementById('console');
         const d = document.createElement('div');
         d.textContent = `> ${msg}`;
-        if (type === 'err') d.style.color = '#ff6b6b';
-        if (type === 'debug') d.style.color = '#888';
+        if (type === 'err') d.className = 'dbg-err';
+        if (type === 'warn') d.className = 'dbg-warn';
+        if (type === 'debug') d.className = 'dbg-info';
         c.appendChild(d);
+        c.scrollTop = c.scrollHeight;
     }
 
     async function handleFiles(files) {
@@ -176,54 +188,58 @@
         document.getElementById('upload-section').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('console').innerHTML = '';
-        
-        if (window.memChartInstance) { window.memChartInstance.destroy(); window.memChartInstance = null; }
+        logCache = {};
 
-        log(`Indexing ${files.length} files...`);
-        fileMap.clear(); filePaths = []; loadedLogs = {};
+        log(`載入 ${files.length} 個檔案物件...`);
         
+        fileMap.clear();
+        filePaths = [];
         for (let i = 0; i < files.length; i++) {
             const path = files[i].webkitRelativePath;
             fileMap.set(path, files[i]);
             filePaths.push(path);
         }
 
-        // Parallel Execution
-        await Promise.all([
-            safeRun(parseOS, 'OS'),
-            safeRun(parseMemory, 'Memory'),
-            safeRun(parseProcess, 'Process'), // Fixed Process Parser
-            safeRun(parseNetwork, 'Network'),
-            safeRun(initLogSystem, 'Logs')    // New Log System
-        ]);
-        
-        log("All tasks completed.", "info");
+        log("索引建立完成，開始非同步分析...", "debug");
+
+        try {
+            await Promise.all([
+                parseOS(),
+                parseMemory(),
+                parseProcess(),
+                parseNetwork(),
+                initLogSystem() // 新的 Log 系統
+            ]);
+            log("🎉 所有模組執行完畢", "info");
+        } catch (e) {
+            log(`❌ 主流程錯誤: ${e.message}`, "err");
+            console.error(e);
+        }
     }
 
-    async function safeRun(fn, name) {
-        try { await fn(); } catch(e) { log(`${name} Error: ${e.message}`, 'err'); }
-    }
-
-    // --- Optimized Finder ---
-    async function findFile(keywords, checkContentFn = null, returnPath = false) {
+    // --- Helpers ---
+    async function findFile(keywords, checkFn = null) {
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
-        
-        // Priority: sos_commands > regular path > fuzzy
+        // Priority 1: sos_commands
         let candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`) || p.endsWith(kw)) && p.includes('sos_commands'));
+        // Priority 2: endsWith
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.endsWith(`/${kw}`)));
+        // Priority 3: includes (fuzzy)
         if (candidates.length === 0) candidates = filePaths.filter(p => kwList.some(kw => p.includes(kw) && !p.endsWith('.xz')));
 
         for (const path of candidates) {
-            const file = fileMap.get(path);
-            const content = await readFileText(file);
+            const content = await readFileText(fileMap.get(path));
             if (!content) continue;
-            
-            // Validate Content
-            if (checkContentFn && !checkContentFn(content)) continue;
-
-            return returnPath ? { content, path } : content;
+            if (checkFn && !checkFn(content)) continue;
+            log(`讀取: ...${path.slice(-40)}`, 'debug');
+            return content;
         }
         return null;
+    }
+
+    // 新增：搜尋所有符合特徵的檔案 (用於 Logs)
+    function findFilesByRegex(regex) {
+        return filePaths.filter(p => regex.test(p) && !p.endsWith('.xz') && !p.endsWith('.gz'));
     }
 
     function readFileText(file) {
@@ -269,73 +285,83 @@
         
         document.getElementById('mem-total-badge').textContent = (total/1024/1024).toFixed(1) + " GB";
 
+        if (window.memChartInstance) window.memChartInstance.destroy();
         const ctx = document.getElementById('memChart').getContext('2d');
         window.memChartInstance = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Used', 'Buff/Cache', 'Free'],
+                labels: ['App Used', 'Buff/Cache', 'Free'],
                 datasets: [{ data: [used, buff+cached+slab, free], backgroundColor: ['#dc3545', '#ffc107', '#198754'], borderWidth: 1 }]
             },
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
         });
     }
 
-    // Fixed PS Parser
     async function parseProcess() {
+        // 重大修正：寬容模式解析 PS
         const data = await findFile(['ps_auxwwwm', 'ps_auxww', 'ps_aux', 'ps'], c => c.includes('PID'));
         const tbody = document.getElementById('ps-tbody');
-        tbody.innerHTML = ''; 
+        tbody.innerHTML = '';
 
-        if (!data) return;
+        if (!data) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">無 PS 資料</td></tr>';
+            return;
+        }
 
         const lines = data.split('\n');
+        log(`PS Parser: 讀取到 ${lines.length} 行`, 'debug');
+
         let procs = [];
-        let map = { user:0, pid:1, cpu:2, cmd:10 }; 
+        // 預設欄位 (PID usually 1, CPU usually 2, Command usually last)
+        // ps aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
         
-        // Smart Header Detection
-        for(let line of lines.slice(0,20)) {
-            if(line.includes('PID') && line.includes('CPU')) {
-                const parts = line.trim().split(/\s+/);
-                map.user = parts.indexOf('USER');
-                map.pid = parts.indexOf('PID');
-                map.cpu = parts.findIndex(c => c.includes('CPU'));
-                map.cmd = parts.indexOf('COMMAND');
-                if(map.cmd === -1) map.cmd = parts.indexOf('CMD');
-                if(map.cmd === -1) map.cmd = 10;
-                break;
+        let validCount = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line || line.startsWith('USER') || line.includes('PID')) continue;
+
+            const parts = line.split(/\s+/);
+            
+            // 寬容檢查：只要大於 7 個欄位就嘗試解析 (某些 Kernel Thread 欄位很少)
+            if (parts.length < 7) continue;
+
+            // 簡單推斷
+            const user = parts[0];
+            const pid = parts[1];
+            const cpu = parseFloat(parts[2]);
+            
+            // 抓取 Command (從第 10 欄開始往後所有內容)
+            // 如果 parts 長度不夠 11，就抓最後一個
+            const cmdStartIdx = 10; 
+            const cmd = parts.length > cmdStartIdx ? parts.slice(cmdStartIdx).join(' ') : parts[parts.length-1];
+
+            // 排除 Kernel Threads (通常以 [ 開頭) 以聚焦在 User Space
+            // if (cmd.startsWith('[')) continue; 
+
+            if (!isNaN(cpu)) {
+                procs.push({ user, pid, cpu, cmd });
+                validCount++;
             }
         }
 
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line || line.includes('PID')) continue;
-            const p = line.split(/\s+/);
-            if (p.length < 10) continue;
+        log(`PS Parser: 成功解析 ${validCount} 個行程`, 'debug');
 
-            // Safe Command Extraction
-            const cmd = p.slice(map.cmd).join(' ');
-            
-            procs.push({
-                user: p[map.user],
-                pid: p[map.pid],
-                cpu: parseFloat(p[map.cpu]) || 0,
-                cmd: cmd
-            });
+        if (procs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-warning">解析失敗 (格式不符)</td></tr>';
+            return;
         }
 
-        // Render TOP 5 safely
         procs.sort((a,b) => b.cpu - a.cpu).slice(0, 5).forEach(p => {
             const row = document.createElement('tr');
-            
-            // 安全插入文字，防止 HTML Injection 或渲染中斷
             row.innerHTML = `
-                <td><small>${p.pid}</small></td>
+                <td><span class="badge bg-light text-dark border">${p.pid}</span></td>
                 <td>${p.user}</td>
                 <td class="fw-bold text-danger">${p.cpu}%</td>
-                <td class="text-truncate" style="max-width: 150px;"></td>
+                <td class="text-truncate" style="max-width: 180px;" title=""></td>
             `;
-            // Command 使用 textContent 賦值，避免特殊符號破壞 HTML
-            row.querySelector('.text-truncate').textContent = p.cmd;
+            // 安全插入 Command
+            row.querySelector('.text-truncate').textContent = p.cmd; 
+            row.querySelector('.text-truncate').title = p.cmd;
             tbody.appendChild(row);
         });
     }
@@ -351,93 +377,101 @@
         while ((match = regex.exec(data)) !== null) {
             const isUp = match[2] === 'UP';
             list.innerHTML += `
-                <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="list-group-item d-flex justify-content-between align-items-center py-2">
                     <span class="fw-bold">${match[1]}</span>
                     <span class="badge ${isUp ? 'bg-success' : 'bg-secondary'}">${match[2]}</span>
                 </div>`;
         }
     }
 
-    // --- New: Log System ---
-    
+    // --- Log System (Fix: Multiple Logs) ---
     async function initLogSystem() {
-        const logFiles = ['messages', 'dmesg', 'secure', 'cron', 'boot.log', 'yum.log', 'dnf.log'];
-        const select = document.getElementById('log-selector');
-        select.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
-        
-        let foundAny = false;
+        const selector = document.getElementById('log-selector');
+        selector.innerHTML = '<option value="" disabled selected>選擇 Log 檔案...</option>';
 
-        // 搜尋這些 Log 檔案
-        for (const logName of logFiles) {
-            // 嘗試尋找並返回路徑物件
-            const result = await findFile([logName], null, true); // true = return object {content, path}
-            
-            if (result) {
-                foundAny = true;
-                // Store in memory
-                loadedLogs[logName] = result.content;
-                
-                // Add to dropdown
-                const opt = document.createElement('option');
-                opt.value = logName;
-                opt.textContent = `${logName} (${result.path.split('/').slice(-2).join('/')})`;
-                select.appendChild(opt);
-            }
+        // Regex: 匹配 messages, dmesg, secure, cron 及其輪替檔 (如 messages-20231201)
+        // 排除 .xz 壓縮檔
+        const logPaths = findFilesByRegex(/.*\/(messages|dmesg|secure|cron|boot\.log|yum\.log|dnf\.log)([-\.]\d+)?$/);
+        
+        if (logPaths.length === 0) {
+            log("未找到系統日誌檔", "warn");
+            document.getElementById('log-viewer').innerHTML = '<div class="text-center text-muted mt-5">無日誌資料</div>';
+            return;
         }
 
-        if (foundAny) {
-            log(`已索引系統 Logs，請使用下拉選單檢視。`, 'info');
-        } else {
-            document.getElementById('log-viewer').innerHTML = '<div class="text-center text-muted mt-5">未找到標準 Log 檔案 (messages/dmesg)</div>';
-        }
-    }
-
-    function renderLog() {
-        const logName = document.getElementById('log-selector').value;
-        const viewer = document.getElementById('log-viewer');
-        const filterText = document.getElementById('log-search').value.toLowerCase();
-        
-        if (!logName || !loadedLogs[logName]) return;
-
-        const content = loadedLogs[logName];
-        const lines = content.split('\n');
-        
-        // 效能優化：只取最後 1000 行
-        const tailLines = lines.slice(-1000);
-        
-        viewer.innerHTML = '';
-        let htmlBuffer = '';
-
-        tailLines.forEach(line => {
-            if (filterText && !line.toLowerCase().includes(filterText)) return;
-            if (!line.trim()) return;
-
-            // Highlight Keywords
-            let cssClass = 'log-line';
-            if (line.match(/error|fail|panic|critical/i)) cssClass += ' log-error';
-            else if (line.match(/warn|alert/i)) cssClass += ' log-warn';
-
-            // Simple formatting (Timestamp detection is hard generally, skipping for speed)
-            htmlBuffer += `<div class="${cssClass}">${escapeHtml(line)}</div>`;
+        // 排序：讓最新的檔案 (通常沒有日期後綴，或日期最新) 排前面
+        logPaths.sort((a, b) => {
+            // 簡單邏輯：越短的名字通常是當前 log (messages vs messages-2023...)
+            if (a.length !== b.length) return a.length - b.length;
+            return a.localeCompare(b);
         });
 
-        viewer.innerHTML = htmlBuffer;
+        log(`掃描到 ${logPaths.length} 個日誌檔`, "info");
+
+        logPaths.forEach(path => {
+            const fileName = path.split('/').pop(); // 只顯示檔名
+            const opt = document.createElement('option');
+            opt.value = path;
+            opt.textContent = fileName;
+            selector.appendChild(opt);
+        });
+    }
+
+    async function renderLog() {
+        const path = document.getElementById('log-selector').value;
+        if (!path) return;
+
+        document.getElementById('log-status').textContent = "Loading...";
+        const viewer = document.getElementById('log-viewer');
+        viewer.innerHTML = '';
+
+        // Check Cache
+        let content = logCache[path];
+        if (!content) {
+            const file = fileMap.get(path);
+            content = await readFileText(file);
+            logCache[path] = content; // Cache it
+        }
+
+        if (!content) {
+            viewer.textContent = "無法讀取檔案內容";
+            return;
+        }
+
+        const lines = content.split('\n');
+        // 只取最後 2000 行
+        const tail = lines.slice(-2000);
+        
+        // Render
+        let html = '';
+        tail.forEach(line => {
+            if (!line.trim()) return;
+            let cls = 'log-line';
+            // Highlight keywords
+            if (line.match(/error|fail|panic|critical|denied/i)) cls += ' log-err';
+            else if (line.match(/warn|alert/i)) cls += ' log-warn';
+            
+            // 簡易的時間戳高亮 (假設前幾碼是日期)
+            // 將 HTML 特殊字元轉義以防 XSS
+            const safeLine = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            html += `<div class="${cls}">${safeLine}</div>`;
+        });
+
+        viewer.innerHTML = html;
         viewer.scrollTop = viewer.scrollHeight; // Scroll to bottom
+        document.getElementById('log-status').textContent = `已載入 ${path.split('/').pop()} (Last ${tail.length} lines)`;
     }
 
     function filterLog() {
-        // Debounce could be added here, but direct call is fine for 1000 lines
-        renderLog();
-    }
-
-    function escapeHtml(text) {
-        if (!text) return text;
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+        const keyword = document.getElementById('log-search').value.toLowerCase();
+        const lines = document.querySelectorAll('.log-line');
+        lines.forEach(div => {
+            if (div.textContent.toLowerCase().includes(keyword)) {
+                div.style.display = 'block';
+            } else {
+                div.style.display = 'none';
+            }
+        });
     }
 
 </script>
