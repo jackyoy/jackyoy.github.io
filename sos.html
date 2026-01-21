@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18.1 (Fixed & SAR)</title>
+    <title>RHEL SOS Analyzer v18.2 (SAR Path Fixed)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.1</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.2</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -232,17 +232,22 @@
                 ip: [/ip_-o_addr$/, /ip_addr$/, /ip_address$/, /ip_a$/, /ifconfig$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
-                // Logic: Must end with /free or be exactly free, avoids disable_on_free
                 free: [/\/sos_commands\/memory\/free$/, /(^|\/)free$/], 
                 meminfo: [/proc\/meminfo$/, /meminfo$/],
-                sar: [/\/sos_commands\/sar\/sar_-A$/, /sar_-A$/, /sa\/sar$/] 
+                // FIXED: Now catches sar08, sar15, etc. in var/log/sa, plus standard sar -A
+                // Added regex for daily sar files: .../var/log/sa/sarXX
+                sar: [
+                    /sar_-A$/,                   // Standard big report
+                    /sos_commands\/sar\/sar.*$/, // Fallback for various sar dumps
+                    /var\/log\/sa\/sar\d+$/,     // Target: var/log/sa/sar08 (Daily text reports)
+                    /sa\/sar$/                   // Other variations
+                ] 
             }
         };
 
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('dir-input');
 
-        // Fixed Event Listeners (Removed syntax error)
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
@@ -329,13 +334,17 @@
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
             
+            // Filter files based on rules
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length === 0) return { content: null, path: null };
             
+            // Sort matches to prioritize deeper paths or specific names if needed
+            // For SAR, we prefer 'sar08' (text) over 'sa08' (binary), regex handles this by matching 'sar'
             matches.sort((a, b) => b.length - a.length);
             
             for (let path of matches) {
-                if (path.includes('sos_commands') && (path.includes('.gz') || path.includes('.xz'))) continue;
+                // Skip compressed files
+                if (path.includes('.gz') || path.includes('.xz')) continue;
 
                 if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
                 const content = App.cache[path];
@@ -396,13 +405,16 @@
             document.getElementById('net-ss').textContent = output;
         };
 
-        // --- SAR Analysis (NEW) ---
+        // --- SAR Analysis (Fixed for sarXX files) ---
         async function runSarAnalysis() {
-            const sar = await findAndRead('sar');
+            // Validator: Ensure it's text and has headers (excludes XML or binary garbage)
+            const isSarText = (t) => (t.includes('%user') || t.includes('CPU') || t.includes('%memused')) && !t.includes('<?xml');
+
+            const sar = await findAndRead('sar', isSarText);
             showSrc('src-sar', sar.path);
             
             if (!sar.content) {
-                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found in report. (Expected: sos_commands/sar/sar -A)</div>';
+                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found. (Checked sar-A and var/log/sa/sarXX)</div>';
                 document.getElementById('sarMemChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
                 return;
             }
@@ -412,7 +424,7 @@
             const cpuData = { user: [], system: [], iowait: [] };
             const memData = { used: [] };
             
-            let section = null; // 'CPU', 'MEM', or null
+            let section = null; 
             let colMap = {};
 
             const splitL = (l) => l.trim().split(/\s+/);
@@ -424,9 +436,16 @@
 
                 const parts = splitL(l);
                 
-                if (l.includes('%user') && l.includes('%idle')) {
+                // Flexible header detection
+                if (l.includes('%user') && (l.includes('%idle') || l.includes('%system'))) {
                     section = 'CPU';
-                    colMap = { user: parts.indexOf('%user'), sys: parts.indexOf('%system'), io: parts.indexOf('%iowait') };
+                    // Dynamic column mapping in case order changes
+                    colMap = { 
+                        user: parts.indexOf('%user'), 
+                        sys: parts.indexOf('%system'), 
+                        io: parts.indexOf('%iowait') 
+                    };
+                    if (colMap.user === -1) section = null; // Abort if critical col missing
                     continue;
                 }
                 if ((l.includes('kbmemused') || l.includes('mbmemused')) && l.includes('%memused')) {
@@ -434,30 +453,34 @@
                     colMap = { mem: parts.indexOf('%memused') };
                     continue;
                 }
-                if (l.includes('kbswpused') || l.includes('dev1-0') || l.includes('tps')) {
+                // Reset on other section headers
+                if (l.includes('kbswpused') || l.includes('DEV') || l.includes('IFACE') || l.includes('tps')) {
                     section = null; 
                     continue;
                 }
 
-                if (!parts[0].includes(':')) continue;
+                // Data parsing: Must start with timestamp
+                // Timestamp regex: HH:MM:SS or HH:MM:SS AM/PM
+                if (!/^\d{2}:\d{2}:\d{2}/.test(parts[0])) continue;
 
                 if (section === 'CPU') {
                     let offset = 0;
                     if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     
-                    const cpuColVal = parts[1 + offset];
-                    if (isNaN(parseFloat(cpuColVal)) && cpuColVal !== 'all') continue; 
-                    if (!isNaN(parseFloat(cpuColVal)) && parseFloat(cpuColVal) % 1 === 0 && parts.length > 8) continue; 
+                    const cpuColVal = parts[1 + offset]; // usually CPU ID or 'all'
+                    // Filter: Skip specific cores, keep 'all' or implicit all
+                    if (!isNaN(parseFloat(cpuColVal)) && parts.length > 5) continue; 
                     
                     const idxUser = colMap.user + offset; 
                     if (parts[idxUser]) {
                          const t = parts[0] + (offset ? ' ' + parts[1] : '');
                          if (timestamps.indexOf(t) === -1) timestamps.push(t);
                          
+                         // Sync data with timestamps length
                          if (timestamps.length > cpuData.user.length) {
-                             cpuData.user.push(parseFloat(parts[idxUser]));
-                             cpuData.system.push(parseFloat(parts[colMap.sys + offset]));
-                             cpuData.iowait.push(parseFloat(parts[colMap.io + offset]));
+                             cpuData.user.push(parseFloat(parts[idxUser]) || 0);
+                             cpuData.system.push(parseFloat(parts[colMap.sys + offset]) || 0);
+                             cpuData.iowait.push(parseFloat(parts[colMap.io + offset]) || 0);
                          }
                     }
                 }
@@ -466,7 +489,7 @@
                     if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     const idxMem = colMap.mem + offset;
                     if (parts[idxMem]) {
-                        memData.used.push(parseFloat(parts[idxMem]));
+                        memData.used.push(parseFloat(parts[idxMem]) || 0);
                     }
                 }
             }
@@ -501,7 +524,7 @@
             }
         }
 
-        // --- Memory Chart (Fixed) ---
+        // --- Memory Chart ---
         async function runMemoryAnalysis() {
             let mem = await findAndRead('free');
             let total = 0, used = 0, free = 0, buff = 0, src = '';
