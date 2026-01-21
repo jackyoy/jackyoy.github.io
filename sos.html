@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v15 (Strict Fix)</title>
+    <title>RHEL SOS Analyzer v16 (Strict Filter)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -44,7 +44,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v15</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v16</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -199,17 +199,22 @@
             currentLogText: "", fullSysctlText: "", processList: [], memChart: null,
             netData: { ss: null, netstat: null }, 
 
-            // Strict Regex Rules
+            // v16 修正：移除所有寬鬆匹配，防止抓到 Swappiness
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                netstat: [/netstat.*neopa$/, /netstat.*-W.*$/, /netstat$/],
-                ss: [/ss_-tulpn$/, /ss_-.*ua.*$/, /ss$/],
+                
+                // Netstat: 只抓包含 neopa, pan 的檔案，且必須包含 _- (避免抓到資料夾或其他)
+                netstat: [/netstat_-.*neopa$/, /netstat_-.*pan$/, /netstat_-W_-neopa$/],
+                
+                // SS: 只抓包含 tulpn, plan, an 的檔案
+                // 絕對不能只寫 /ss$/，那樣會抓到 memory.swappiness
+                ss: [/ss_-tulpn$/, /ss_-plan$/, /ss_-an$/],
+                
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
                 uname: [/uname_-a$/],
                 dmidecode: [/dmidecode$/],
-                // Updated IP rules to catch RHEL 8 variants
                 ip: [/ip_-o_addr$/, /ip_addr$/, /ip_address$/, /ip_a$/, /ifconfig$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
@@ -309,32 +314,30 @@
             matches.sort((a, b) => b.length - a.length);
             
             for (let path of matches) {
+                // 如果找到 sos_commands 下的檔案，優先使用
                 if (matches.find(m => m.includes('sos_commands')) && !path.includes('sos_commands')) continue;
+
                 if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
                 const content = App.cache[path];
                 if (validateFn && !validateFn(content)) continue;
                 return { content, path };
             }
             
-            const fallback = matches[0];
-            if (!App.cache[fallback]) App.cache[fallback] = await App.files.get(fallback).text();
-            return { content: App.cache[fallback], path: fallback };
+            return { content: null, path: null };
         }
 
-        // --- Network Analysis (Strict Fix) ---
+        // --- Network Analysis (Anti-Swappiness & Anti-Stats) ---
         async function runNetwork() {
-            // Strict Validation Function
+            // 驗證邏輯：必須是連線清單，不能是統計，不能是數字
             const isValidPortList = (text) => {
-                // 1. REJECT STATISTICS (The user's error case)
-                if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false;
-                
-                // 2. REJECT VM INFO
-                if (text.includes('OS Type:') && text.includes('UUID:') && text.includes('Id:')) return false;
+                // 1. REJECT if content is too short (Avoids "60")
+                if (text.length < 50) return false;
 
-                // 3. REJECT Single Numbers (swappiness case)
-                if (text.length < 10) return false;
-                
-                // 4. MUST HAVE Headers
+                // 2. REJECT Statistics files
+                if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false;
+                if (text.startsWith('Total:') && text.includes('TCP:')) return false; // SS -s output
+
+                // 3. MUST HAVE Headers
                 const hasNetstatHeader = text.includes('Proto') && (text.includes('Address') || text.includes('Recv-Q'));
                 const hasSSHeader = text.includes('State') || text.includes('Netid');
                 
@@ -354,11 +357,10 @@
                 document.getElementById('btn-ss').checked = true;
                 renderNetwork('ss');
             } else {
-                document.getElementById('net-ss').textContent = "No valid 'ss' or 'netstat' output found (Verified).";
+                document.getElementById('net-ss').textContent = "No valid Port list found.\n(Ignored stats files and swappiness)";
                 showSrc('src-ss', null);
             }
 
-            // IP Analysis (Expanded Rules)
             const ip = await findAndRead('ip');
             showSrc('src-ip', ip.path);
             if (ip.content) document.getElementById('net-ip').textContent = ip.content;
@@ -438,95 +440,3 @@
                         if (!isNaN(mem)) parsed.push({ user: p[0], pid: parseInt(p[1]), mem, cpu, cmd: p.slice(10).join(' ') });
                     }
                     App.processList = parsed;
-                    sortProcs('mem', 'desc');
-                    const mwRegex = /java|python|node|httpd|nginx|mysql|postgres|docker|kube/i;
-                    const mw = parsed.filter(p => mwRegex.test(p.cmd) && !p.cmd.includes(' grep '));
-                    document.getElementById('info-middleware').textContent = mw.length ? mw.map(p=>`${p.user} (${p.pid}): ${p.cmd}`).join('\n') : "No common middleware found.";
-                }
-            }
-            const dmi = await findAndRead('dmidecode');
-            showSrc('src-dmi', dmi.path);
-            if(dmi.content) {
-                const prod = (dmi.content.match(/Product Name:\s*(.+)/)||[])[1];
-                const vend = (dmi.content.match(/Manufacturer:\s*(.+)/)||[])[1];
-                const bios = (dmi.content.match(/Version:\s*(.+)/)||[])[1];
-                if(prod) document.getElementById('info-model').textContent = prod; if(vend) document.getElementById('info-vendor').textContent = vend; if(bios) document.getElementById('info-bios').textContent = bios;
-            }
-        }
-
-        let currentSort = { key: 'mem', order: 'desc' };
-        window.sortProcs = function(key) {
-            if (currentSort.key === key) currentSort.order = currentSort.order === 'desc' ? 'asc' : 'desc';
-            else { currentSort.key = key; currentSort.order = 'desc'; }
-            document.querySelectorAll('.sort-icon').forEach(el => el.textContent = '');
-            document.getElementById(`sort-${currentSort.key}`).textContent = currentSort.order === 'desc' ? '▼' : '▲';
-            const sorted = [...App.processList].sort((a, b) => {
-                if (key === 'cmd' || key === 'user') return currentSort.order === 'asc' ? a[key].localeCompare(b[key]) : b[key].localeCompare(a[key]);
-                return currentSort.order === 'asc' ? a[key] - b[key] : b[key] - a[key];
-            });
-            document.getElementById('mem-table-body').innerHTML = sorted.slice(0, 50).map(p => `<tr><td>${p.pid}</td><td>${p.user}</td><td>${p.mem}%</td><td>${p.cpu}%</td><td class="text-truncate" style="max-width:200px" title="${p.cmd}">${p.cmd}</td></tr>`).join('');
-        };
-
-        // --- Other Modules ---
-        async function runDashboard() {
-            const h = await findAndRead('hostname'); if(h.content) document.getElementById('dash-hostname').textContent = h.content.trim();
-            const r = await findAndRead('release'); if(r.content) document.getElementById('dash-release').textContent = r.content.split('\n')[0];
-            const u = await findAndRead('uptime'); if(u.content) document.getElementById('dash-uptime').textContent = u.content.trim();
-            const k = await findAndRead('uname'); if(k.content) { const p = k.content.split(' '); document.getElementById('dash-kernel').textContent = p.length>=3?p[2]:k.content; }
-        }
-        async function runKernel() {
-            const ls = await findAndRead('lsmod'); showSrc('src-lsmod', ls.path);
-            if(ls.content) {
-                const lines = ls.content.split('\n');
-                let mods = []; lines.forEach(l=>{const p=l.split(/\s+/); if(p.length>=2&&p[0]!=='Module'){const s=parseInt(p[1]);if(!isNaN(s))mods.push({name:p[0],size:s,used:p[2]||'-'});}});
-                document.getElementById('lsmod-count').textContent = mods.length;
-                document.getElementById('lsmod-body').innerHTML = mods.sort((a,b)=>b.size-a.size).slice(0,10).map(m=>`<tr><td>${m.name}</td><td>${(m.size/1024).toFixed(2)} KB</td><td>${m.used}</td></tr>`).join('');
-            }
-            const sys = await findAndRead('sysctl'); showSrc('src-sysctl', sys.path);
-            if(sys.content) { App.fullSysctlText = sys.content; filterSysctl(); }
-        }
-        function filterSysctl() {
-            const t = document.getElementById('sysctl-search').value.toLowerCase();
-            const lines = App.fullSysctlText.split('\n');
-            document.getElementById('sysctl-box').textContent = (t ? lines.filter(l=>l.toLowerCase().includes(t)) : lines.slice(0,100)).join('\n');
-        }
-        function buildLogTree() {
-            const tree = document.getElementById('log-tree'); tree.innerHTML = '';
-            const cats = { "System": [/messages/, /dmesg/, /boot/], "Security": [/secure/, /audit/], "Package": [/dnf/, /yum/], "Cron": [/cron/], "Others": [] };
-            const found = { "System": [], "Security": [], "Package": [], "Cron": [], "Others": [] };
-            App.filePaths.forEach(p => {
-                if (!p.match(/var\/log|sos_commands\/logs|dmesg/)) return;
-                if (p.match(/\.gz$|wtmp|lastlog/)) return;
-                let m = false; for(let c in cats){ if(c==='Others')continue; if(cats[c].some(r=>r.test(p))){ found[c].push(p); m=true; break; } }
-                if(!m && p.includes('var/log')) found['Others'].push(p);
-            });
-            for(let c in found) {
-                if(!found[c].length) continue;
-                const g = document.createElement('div'); g.className='log-group'; g.textContent=c; tree.appendChild(g);
-                found[c].sort().forEach(p => { const i=document.createElement('div'); i.className='log-item'; i.textContent=p.split('/').pop(); i.onclick=()=>loadLog(p,i); tree.appendChild(i); });
-            }
-        }
-        async function loadLog(path, el) {
-            document.querySelectorAll('.log-item').forEach(e=>e.classList.remove('active')); el.classList.add('active');
-            document.getElementById('log-current-file').textContent = path;
-            const v = document.getElementById('log-content-area'); v.textContent = "Loading...";
-            let t = await App.files.get(path).text();
-            if(t.length > 50000) t = `[Truncated last 50k]\n` + t.slice(-50000);
-            App.currentLogText = t; v.textContent = t; v.scrollTop = v.scrollHeight;
-        }
-        function filterLogContent() {
-            const t = document.getElementById('log-search-input').value.toLowerCase();
-            document.getElementById('log-content-area').textContent = t ? App.currentLogText.split('\n').filter(l=>l.toLowerCase().includes(t)).join('\n') : App.currentLogText;
-        }
-        function toggleLoader(s) { document.getElementById('loader').classList.toggle('hidden', !s); }
-        function showSrc(id, p) { const el=document.getElementById(id); if(el) el.textContent = p?`SRC: .../${p.split('/').pop()}`:'Not Found'; }
-        function switchTab(id) {
-            document.querySelectorAll('.content-view').forEach(e=>e.classList.add('hidden'));
-            document.getElementById('view-'+id).classList.remove('hidden');
-            document.querySelectorAll('.nav-link').forEach(e=>e.classList.remove('active'));
-            const nav = Array.from(document.querySelectorAll('.nav-link')).find(n=>n.getAttribute('onclick').includes(id));
-            if(nav) nav.classList.add('active');
-        }
-    </script>
-</body>
-</html>
