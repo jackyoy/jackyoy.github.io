@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 檔案分析工具</title>
+    <title>RHEL SAR 檔案分析工具 (v2)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -112,7 +112,7 @@
 <body>
 
 <header>
-    <h1>RHEL SAR 檔案分析工具</h1>
+    <h1>RHEL SAR 檔案分析工具 (v2)</h1>
 </header>
 
 <div id="drop-zone">
@@ -131,7 +131,7 @@
         <select id="section-select" disabled></select>
     </div>
     <div class="control-group">
-        <label for="item-select">項目 (Instance, e.g., CPU Core, Interface)</label>
+        <label for="item-select">項目 (Instance)</label>
         <select id="item-select" disabled></select>
     </div>
     <div class="control-group">
@@ -148,44 +148,55 @@
 
 <script>
     /**
-     * SAR Parser Logic
+     * SAR Parser Logic (Enhanced)
      */
     'use strict';
 
     class SarParser {
         constructor() {
-            this.filesData = {}; // { fileName: { date: '...', hostname: '...', sections: { 'CPU': { columns: [], data: { 'all': [{time, values...}] } } } } }
+            this.filesData = {};
         }
 
         parseFile(fileName, content) {
             const lines = content.split(/\r?\n/);
-            let currentDate = '';
-            let hostname = '';
-            let currentSectionColumns = null;
-            let currentSectionName = null;
             
-            // Temporary storage for the current parsing file
             const fileObj = {
                 date: '',
                 hostname: '',
-                sections: {} 
-                // Structure: sections[sectionName] = { 
-                //    columns: ['%usr', '%sys'...], 
-                //    instances: { 'all': [ {t: '00:00:01', vals: { '%usr': 0.1 }} ] } 
-                // }
+                sections: {}
             };
 
             const timeRegex = /^\d{2}:\d{2}:\d{2}\s+/;
             const headerRegex = /^Linux\s+/;
+            
+            // State variables
+            let currentSectionName = null;
+            let currentColumns = null;
+            let keyColumnIndex = -1; // -1 means global section (no instance ID like eth0, sda)
+
+            // Pre-defined known columns that act as keys (Instance IDs)
+            const KNOWN_KEYS = ['CPU', 'IFACE', 'DEV', 'INTR', 'BUS', 'FAN', 'TEMP', 'IN'];
+            
+            // Section Name Mapping for better readability
+            const SECTION_MAP = {
+                'CPU': 'CPU Usage',
+                'IFACE': 'Network',
+                'DEV': 'Disk I/O',
+                'kbmemfree': 'Memory',
+                'runq-sz': 'Load / Queue',
+                'plist-sz': 'Process List',
+                'tps': 'I/O & Transfer',
+                'pgpgin': 'Paging',
+                'dentunusd': 'Kernel Tables'
+            };
 
             lines.forEach(line => {
                 line = line.trim();
                 if (!line) return;
 
-                // 1. Parse Header: Linux 4.18... (hostname) date
+                // 1. Parse File Header
                 if (headerRegex.test(line)) {
                     const parts = line.split(/\s+/);
-                    // Linux version hostname date arch (cpu_count)
                     if (parts.length >= 4) {
                         fileObj.hostname = parts[2].replace(/[()]/g, '');
                         fileObj.date = parts[3];
@@ -194,81 +205,75 @@
                 }
 
                 // 2. Detect Section Headers
-                // A section header usually starts with a time format, followed by text headers (not numbers)
-                // Exception: "Average:" lines, we usually ignore them for time charts, or "00:00:01" followed by headers
-                // Heuristic: If line starts with Time, and subsequent parts are NOT numbers, it's a header.
                 if (timeRegex.test(line)) {
                     const parts = line.split(/\s+/);
-                    const potentialTime = parts[0];
-                    const secondCol = parts[1];
+                    const col2 = parts[1];
 
-                    // Check if second column is a number (data) or text (header)
-                    // Note: 'CPU', 'IFACE', 'DEV', 'tps' are typically headers.
-                    if (isNaN(parseFloat(secondCol)) && secondCol !== 'all') {
-                        // It's a header row
-                        // Determine Section Name based on identifying columns
-                        // Common patterns:
-                        // CPU section: 2nd col is 'CPU' or 'proc/s'
-                        // Disk: 2nd col 'DEV'
-                        // Net: 2nd col 'IFACE'
-                        // Memory: kbmemfree etc (sometimes no explicit ID column, metrics start immediately)
+                    // Heuristic: Header lines usually have text in col2 that are NOT numbers (and not 'all')
+                    // Special case: 'tps' is a header, but lines below it start with numbers.
+                    // If col2 is not a number, it's likely a header.
+                    if (isNaN(parseFloat(col2)) && col2 !== 'all') {
                         
-                        let keyColIndex = 1; // Default index for the "Instance" identifier
-                        let sectionKey = secondCol; // Default section name
+                        // It is a header row
+                        const rawColumns = parts.slice(1); // Exclude Time column
+                        
+                        // Determine if this section has an Instance Key (e.g. DEV, CPU)
+                        // Search for known key columns
+                        keyColumnIndex = -1;
+                        let sectionKey = null;
 
-                        // Normalize common sar sections
-                        if (parts.includes('CPU')) {
-                            sectionKey = 'CPU Usage';
-                            keyColIndex = parts.indexOf('CPU');
-                        } else if (parts.includes('IFACE')) {
-                            sectionKey = 'Network';
-                            keyColIndex = parts.indexOf('IFACE');
-                        } else if (parts.includes('DEV')) {
-                            sectionKey = 'Disk I/O';
-                            keyColIndex = parts.indexOf('DEV');
-                        } else if (parts.includes('runq-sz')) {
-                            sectionKey = 'Queue & Load';
-                            keyColIndex = -1; // No specific instance, global stats
-                        } else if (parts.includes('kbmemfree')) {
-                            sectionKey = 'Memory';
-                            keyColIndex = -1;
-                        } else if (parts.includes('tps')) {
-                            // Generic I/O without DEV prefix? rare in modern sar
-                            sectionKey = 'I/O';
+                        for (let i = 0; i < rawColumns.length; i++) {
+                            if (KNOWN_KEYS.includes(rawColumns[i])) {
+                                keyColumnIndex = i;
+                                sectionKey = rawColumns[i];
+                                break;
+                            }
                         }
 
-                        currentSectionName = sectionKey;
-                        currentSectionColumns = parts.slice(1); // Exclude time
+                        // Identify Section Name
+                        if (sectionKey && SECTION_MAP[sectionKey]) {
+                            currentSectionName = SECTION_MAP[sectionKey];
+                        } else {
+                            // Try to map by the first column name if no key found (e.g., tps, kbmemfree)
+                            if (SECTION_MAP[rawColumns[0]]) {
+                                currentSectionName = SECTION_MAP[rawColumns[0]];
+                            } else {
+                                currentSectionName = rawColumns[0]; // Fallback
+                            }
+                        }
                         
-                        // Initialize section in data structure if not exists
+                        currentColumns = rawColumns;
+
+                        // Initialize section storage
                         if (!fileObj.sections[currentSectionName]) {
                             fileObj.sections[currentSectionName] = {
-                                columns: currentSectionColumns,
-                                keyIndex: keyColIndex - 1, // Adjust for 0-based index after slicing time
+                                columns: currentColumns,
+                                hasInstance: (keyColumnIndex !== -1),
+                                keyIndex: keyColumnIndex,
                                 instances: {}
                             };
                         }
-                        return; // Done processing header
+                        return;
                     }
 
                     // 3. Process Data Row
-                    if (currentSectionName && currentSectionColumns) {
-                        // If it's data, we map values to columns
-                        // Ignore "Average:" lines
-                        if (line.startsWith('Average:')) return;
+                    if (currentSectionName && currentColumns) {
+                        if (line.startsWith('Average:')) return; // Ignore averages
 
                         const rowParts = line.split(/\s+/);
                         const time = rowParts[0];
                         const values = rowParts.slice(1);
 
-                        // If column counts mismatch, abort this line (simple validation)
-                        if (values.length !== currentSectionColumns.length) return;
+                        // Basic validation: count matches columns
+                        // But wait, if it's a global section (keyIndex == -1), values.length == columns.length
+                        // If instance section, values.length == columns.length
+                        if (values.length !== currentColumns.length) return;
 
                         const sectionDef = fileObj.sections[currentSectionName];
-                        let instanceName = 'default';
+                        let instanceName = 'all';
 
-                        // Extract Instance Name (e.g., 'all', '0', 'eth0', 'sda')
-                        if (sectionDef.keyIndex >= 0) {
+                        // Extract Instance Name or use default
+                        if (sectionDef.hasInstance) {
                             instanceName = values[sectionDef.keyIndex];
                         }
 
@@ -276,13 +281,19 @@
                             sectionDef.instances[instanceName] = [];
                         }
 
-                        // Map metrics
                         const metricObj = { time: time };
-                        sectionDef.columns.forEach((col, idx) => {
-                            // Don't map the key column itself as a metric value usually, but strictly keeping all is safer
-                            // Try parsing as float
-                            const val = parseFloat(values[idx]);
-                            metricObj[col] = isNaN(val) ? values[idx] : val;
+                        
+                        values.forEach((val, idx) => {
+                            // If this column is the key (e.g. 'DEV'), keep it but usually we plot numbers
+                            // Try convert to float
+                            const floatVal = parseFloat(val);
+                            
+                            // Map to column name
+                            const colName = currentColumns[idx];
+                            
+                            // Store only if it's not the key column itself (optional, but cleaner)
+                            // or just store everything. Let's store everything, chart logic will filter non-numbers.
+                            metricObj[colName] = isNaN(floatVal) ? val : floatVal;
                         });
 
                         sectionDef.instances[instanceName].push(metricObj);
@@ -290,7 +301,6 @@
                 }
             });
 
-            // Post-processing: Generate a unique ID for this parsed file
             const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
             this.filesData[fileId] = fileObj;
             return fileId;
@@ -302,7 +312,7 @@
     }
 
     /**
-     * UI & Chart Logic
+     * UI Logic
      */
     const parser = new SarParser();
     const dropZone = document.getElementById('drop-zone');
@@ -310,21 +320,14 @@
     const fileListDisplay = document.getElementById('file-list-display');
     const errorDisplay = document.getElementById('error-display');
     
-    // Selectors
     const fileSelect = document.getElementById('file-select');
     const sectionSelect = document.getElementById('section-select');
     const itemSelect = document.getElementById('item-select');
     const metricSelect = document.getElementById('metric-select');
-
-    // Chart
     let myChart = null;
 
-    // Drag & Drop Handlers
     dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('dragover');
-    });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -335,8 +338,8 @@
 
     function handleFiles(files) {
         errorDisplay.style.display = 'none';
-        let processedCount = 0;
         const totalFiles = files.length;
+        let processedCount = 0;
         const fileNames = [];
 
         Array.from(files).forEach(file => {
@@ -348,76 +351,51 @@
                     addOption(fileSelect, fileId, fileId);
                 } catch (err) {
                     console.error(err);
-                    showError(`無法解析檔案 ${file.name}`);
                 } finally {
                     processedCount++;
-                    if (processedCount === totalFiles) {
-                        updateUIState();
-                    }
+                    if (processedCount === totalFiles) updateUIState();
                 }
             };
             reader.readAsText(file);
         });
-        
         fileListDisplay.textContent = `已載入: ${fileNames.join(', ')}`;
     }
 
-    function addOption(selectElement, text, value) {
-        // Clear default "Please upload" if it exists
-        if (selectElement.options[0] && selectElement.options[0].text.includes('請先上傳')) {
-            selectElement.innerHTML = '';
-            selectElement.disabled = false;
+    function addOption(select, text, value) {
+        if (select.options[0] && select.options[0].text.includes('請先上傳')) {
+            select.innerHTML = '';
+            select.disabled = false;
         }
-        // Avoid duplicates
-        for (let i = 0; i < selectElement.options.length; i++) {
-            if (selectElement.options[i].value === value) return;
+        for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === value) return;
         }
-        const option = document.createElement('option');
-        option.text = text;
-        option.value = value;
-        selectElement.add(option);
-        
-        // Trigger event if it's the first real option
-        if (selectElement.options.length === 1) {
-            selectElement.dispatchEvent(new Event('change'));
-        }
+        const opt = document.createElement('option');
+        opt.text = text;
+        opt.value = value;
+        select.add(opt);
     }
 
     function updateUIState() {
-        // Trigger chain update starting from File Select
-        if (fileSelect.options.length > 0) {
-            fileSelect.dispatchEvent(new Event('change'));
-        }
+        if (fileSelect.options.length > 0) fileSelect.dispatchEvent(new Event('change'));
     }
 
-    function showError(msg) {
-        errorDisplay.textContent = msg;
-        errorDisplay.style.display = 'block';
-    }
-
-    // Event Listeners for Selectors
+    // Cascading Selects
     fileSelect.addEventListener('change', () => {
-        const fileId = fileSelect.value;
-        const data = parser.getData()[fileId];
-        
+        const data = parser.getData()[fileSelect.value];
         sectionSelect.innerHTML = '';
-        itemSelect.innerHTML = '';
-        metricSelect.innerHTML = '';
-        
         if (!data) return;
-
-        const sections = Object.keys(data.sections);
-        sections.forEach(sec => {
+        
+        // Sort sections nicely
+        Object.keys(data.sections).sort().forEach(sec => {
             const opt = document.createElement('option');
             opt.value = sec;
             opt.text = sec;
             sectionSelect.add(opt);
         });
         sectionSelect.disabled = false;
-        
-        if (sections.length > 0) {
-            // Default to CPU if available
-            if (sections.includes('CPU Usage')) sectionSelect.value = 'CPU Usage';
+        if (sectionSelect.options.length > 0) {
+            // Prefer common sections if available
+            if (data.sections['CPU Usage']) sectionSelect.value = 'CPU Usage';
             sectionSelect.dispatchEvent(new Event('change'));
         }
     });
@@ -426,13 +404,13 @@
         const fileId = fileSelect.value;
         const sectionName = sectionSelect.value;
         const data = parser.getData()[fileId].sections[sectionName];
-
+        
         itemSelect.innerHTML = '';
         metricSelect.innerHTML = '';
-
+        
         if (!data) return;
 
-        // Populate Instances (e.g., all, 0, 1)
+        // Populate Instances
         const instances = Object.keys(data.instances);
         instances.forEach(inst => {
             const opt = document.createElement('option');
@@ -441,15 +419,14 @@
             itemSelect.add(opt);
         });
         itemSelect.disabled = false;
-
-        // Populate Metrics (Columns excluding identifying columns)
-        // Identify numeric columns only
-        const sampleInstance = instances[0];
-        if (sampleInstance) {
-            const sampleData = data.instances[sampleInstance][0];
+        
+        // Populate Metrics (Numeric only)
+        // Check first row of first instance
+        const firstInst = instances[0];
+        if (firstInst && data.instances[firstInst].length > 0) {
+            const sampleRow = data.instances[firstInst][0];
             data.columns.forEach(col => {
-                // Filter out non-numeric identifying columns (like CPU, DEV)
-                if (typeof sampleData[col] === 'number') {
+                if (typeof sampleRow[col] === 'number') {
                     const opt = document.createElement('option');
                     opt.value = col;
                     opt.text = col;
@@ -458,18 +435,22 @@
             });
         }
         metricSelect.disabled = false;
-
-        // Default selections
+        
+        // Defaults
         if (instances.includes('all')) itemSelect.value = 'all';
-        // Select common metrics by default
-        const commonMetrics = ['%usr', '%util', 'rxkB/s', 'runq-sz'];
-        for (const m of commonMetrics) {
+        
+        // Smart metric default
+        const preferred = ['%usr', '%util', 'kbmemfree', 'runq-sz', 'rxkB/s', 'tps'];
+        for (const p of preferred) {
+            let found = false;
             for(let i=0; i<metricSelect.options.length; i++) {
-                if(metricSelect.options[i].value === m) {
-                    metricSelect.value = m;
+                if(metricSelect.options[i].value === p) {
+                    metricSelect.value = p;
+                    found = true;
                     break;
                 }
             }
+            if(found) break;
         }
 
         renderChart();
@@ -487,33 +468,26 @@
         if (!fileId || !sectionName || !instanceName || !metricName) return;
 
         const dataObj = parser.getData()[fileId];
-        const sectionData = dataObj.sections[sectionName];
-        const timeSeries = sectionData.instances[instanceName];
+        const timeSeries = dataObj.sections[sectionName].instances[instanceName];
 
-        if (!timeSeries || timeSeries.length === 0) return;
-
-        // Prepare Chart Data
         const labels = timeSeries.map(d => d.time);
         const values = timeSeries.map(d => d[metricName]);
 
         const ctx = document.getElementById('sarChart').getContext('2d');
-
-        if (myChart) {
-            myChart.destroy();
-        }
+        if (myChart) myChart.destroy();
 
         myChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: `${instanceName} - ${metricName}`,
+                    label: `${metricName} (${instanceName})`,
                     data: values,
                     borderColor: '#0056b3',
                     backgroundColor: 'rgba(0, 86, 179, 0.1)',
                     borderWidth: 2,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
+                    pointRadius: 0, 
+                    pointHitRadius: 10,
                     fill: true,
                     tension: 0.2
                 }]
@@ -526,39 +500,20 @@
                     intersect: false,
                 },
                 plugins: {
-                    title: {
-                        display: true,
-                        text: `${dataObj.hostname} (${dataObj.date}) - ${sectionName}`
-                    },
+                    title: { display: true, text: `${dataObj.hostname} - ${sectionName}` },
                     tooltip: {
                         callbacks: {
-                            label: function(context) {
-                                return `${context.dataset.label}: ${context.parsed.y}`;
-                            }
+                            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
                         }
                     }
                 },
                 scales: {
-                    x: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Time'
-                        }
-                    },
-                    y: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: metricName
-                        },
-                        beginAtZero: true
-                    }
+                    x: { ticks: { maxTicksLimit: 20 } },
+                    y: { beginAtZero: true }
                 }
             }
         });
     }
-
 </script>
 
 </body>
