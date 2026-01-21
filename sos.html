@@ -203,8 +203,8 @@
 
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                netstat: [/netstat_-.*neopa$/, /netstat_-.*pan$/, /netstat_-W_-neopa$/],
-                ss: [/ss_-tulpn$/, /ss_-plan$/, /ss_-an$/], // Explicit names only
+                netstat: [/netstat_-.*$/], // Relaxed regex: match any netstat file
+                ss: [/ss_-.*$/], // Relaxed regex: match any ss file (validation function handles filtering)
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
