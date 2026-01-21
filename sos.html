@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18.4 (SAR Selector)</title>
+    <title>RHEL SOS Analyzer v18.5 (Strict Net Filter)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.4</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.5</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -231,12 +231,16 @@
             currentLogText: "", fullSysctlText: "", processList: [], 
             memChart: null, sarCpuChart: null, sarMemChart: null,
             netData: { ss: null, netstat: null }, 
-            sarFiles: [], // Store list of found SAR files
+            sarFiles: [],
 
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                netstat: [/netstat.*$/], 
-                ss: [/ss.*$/],
+                
+                // FIXED: Strictly require the filename to start with 'netstat' or 'ss'
+                // This prevents 'openssl.cnf' (ends with .cnf) from being matched by /ss.*/
+                netstat: [/(^|\/)netstat$/, /(^|\/)netstat_-.*$/], 
+                ss: [/(^|\/)ss$/, /(^|\/)ss_-.*$/],
+                
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
@@ -363,16 +367,24 @@
             return { content: null, path: null };
         }
 
-        // --- Network Analysis ---
+        // --- Network Analysis (Strict Fix) ---
         async function runNetwork() {
             const isValidPortList = (text) => {
                 if (text.length < 30) return false;
+                
+                // Explicitly exclude binary/garbage
                 if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false;
-                if (text.startsWith('Total:') && text.includes('TCP:')) return false;
-                if (text.includes('OS Type:') && text.includes('UUID:')) return false;
-                const hasNetstatHeader = text.includes('Proto') && (text.includes('Address') || text.includes('Recv-Q'));
-                const hasSSHeader = (text.includes('State') || text.includes('ESTAB')) && (text.includes('Netid') || text.includes('Address'));
-                return hasNetstatHeader || hasSSHeader;
+                
+                // Explicitly exclude openssl configs (False positive fix)
+                if (text.includes('stateOrProvinceName') || text.includes('organizationalUnitName')) return false;
+                if (text.includes('BEGIN CERTIFICATE')) return false;
+
+                // Stricter Header Validation
+                // Must look like: "Proto Recv-Q..." or "State Recv-Q..." or "Netid State..."
+                const hasNetstatHeader = (text.includes('Proto') && text.includes('Recv-Q')) || text.includes('Active Internet connections');
+                const hasSSHeader = (text.includes('Netid') && text.includes('State')) || (text.includes('State') && text.includes('Recv-Q'));
+                
+                return hasNetstatHeader || hasSSHeader || text.includes('LISTEN');
             };
 
             const net = await findAndRead('netstat', isValidPortList);
@@ -388,7 +400,7 @@
                 document.getElementById('btn-ss').checked = true;
                 renderNetwork('ss');
             } else {
-                document.getElementById('net-ss').textContent = "No valid Port list found.";
+                document.getElementById('net-ss').textContent = "No valid Port list found.\n(Checked filenames starting with 'netstat' or 'ss')";
                 showSrc('src-ss', null);
             }
 
@@ -417,13 +429,8 @@
         // --- SAR Selection Logic ---
         async function initializeSarSelector() {
             const sarRegexList = App.rules.sar;
-            // 1. Find all matching files
             let candidates = App.filePaths.filter(p => sarRegexList.some(r => r.test(p)));
-            
-            // 2. Filter out compressed files
             candidates = candidates.filter(p => !p.includes('.gz') && !p.includes('.xz'));
-            
-            // 3. Sort candidates (sar08, sar09, sar10...)
             candidates.sort();
 
             App.sarFiles = candidates;
@@ -440,13 +447,10 @@
             candidates.forEach(path => {
                 const opt = document.createElement('option');
                 opt.value = path;
-                // Show simple name in dropdown
                 opt.textContent = path.split('/').pop(); 
                 selectEl.appendChild(opt);
             });
 
-            // Auto-load the last one (usually latest date) or the first one
-            // Ideally last one if they are sorted by date
             const defaultFile = candidates[candidates.length - 1];
             selectEl.value = defaultFile;
             loadSelectedSar(defaultFile);
@@ -458,7 +462,6 @@
             if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
             const content = App.cache[path];
             
-            // Simple validation before parsing
             const isSarText = (t) => (t.includes('CPU') || t.includes('%usr') || t.includes('%user')) && !t.includes('<?xml');
             
             if (!isSarText(content)) {
@@ -488,7 +491,6 @@
 
                 const parts = splitL(l);
                 
-                // Header Detection
                 if ((l.includes('%user') || l.includes('%usr')) && (l.includes('%idle') || l.includes('%system') || l.includes('%sys'))) {
                     section = 'CPU';
                     let idxUser = parts.indexOf('%user');
@@ -511,7 +513,6 @@
                     continue;
                 }
 
-                // Data Parsing
                 if (!/^\d{2}:\d{2}:\d{2}/.test(parts[0])) continue;
 
                 if (section === 'CPU') {
@@ -543,7 +544,6 @@
                 }
             }
 
-            // Update Charts
             if (App.sarCpuChart) App.sarCpuChart.destroy();
             if (App.sarMemChart) App.sarMemChart.destroy();
 
