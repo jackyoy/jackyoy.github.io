@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RHEL SAR 檔案分析工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #0056b3;
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --border-color: #dee2e6;
+            --text-color: #333;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        header {
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            color: var(--primary-color);
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #666;
+        }
+
+        select, input[type="file"] {
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background-color: #fff;
+        }
+
+        #drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            background-color: #fafafa;
+            transition: background-color 0.2s;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        #drop-zone.dragover {
+            background-color: #e9ecef;
+            border-color: var(--primary-color);
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            background: var(--card-bg);
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+
+        .error-msg {
+            color: #dc3545;
+            font-size: 0.9rem;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .file-list {
+            margin-top: 5px;
+            font-size: 0.85rem;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>RHEL SAR 檔案分析工具</h1>
+</header>
+
+<div id="drop-zone">
+    <p>點擊選擇或將 SAR 檔案拖曳至此處 (支援多檔)</p>
+    <input type="file" id="file-input" multiple style="display: none;">
+    <div id="file-list-display" class="file-list"></div>
+</div>
+
+<div class="controls">
+    <div class="control-group">
+        <label for="file-select">選擇檔案 (主機/日期)</label>
+        <select id="file-select" disabled><option>請先上傳檔案</option></select>
+    </div>
+    <div class="control-group">
+        <label for="section-select">分析類別 (Section)</label>
+        <select id="section-select" disabled></select>
+    </div>
+    <div class="control-group">
+        <label for="item-select">項目 (Instance, e.g., CPU Core, Interface)</label>
+        <select id="item-select" disabled></select>
+    </div>
+    <div class="control-group">
+        <label for="metric-select">指標 (Metric)</label>
+        <select id="metric-select" disabled></select>
+    </div>
+</div>
+
+<div id="error-display" class="error-msg"></div>
+
+<div class="chart-container">
+    <canvas id="sarChart"></canvas>
+</div>
+
+<script>
+    /**
+     * SAR Parser Logic
+     */
+    'use strict';
+
+    class SarParser {
+        constructor() {
+            this.filesData = {}; // { fileName: { date: '...', hostname: '...', sections: { 'CPU': { columns: [], data: { 'all': [{time, values...}] } } } } }
+        }
+
+        parseFile(fileName, content) {
+            const lines = content.split(/\r?\n/);
+            let currentDate = '';
+            let hostname = '';
+            let currentSectionColumns = null;
+            let currentSectionName = null;
+            
+            // Temporary storage for the current parsing file
+            const fileObj = {
+                date: '',
+                hostname: '',
+                sections: {} 
+                // Structure: sections[sectionName] = { 
+                //    columns: ['%usr', '%sys'...], 
+                //    instances: { 'all': [ {t: '00:00:01', vals: { '%usr': 0.1 }} ] } 
+                // }
+            };
+
+            const timeRegex = /^\d{2}:\d{2}:\d{2}\s+/;
+            const headerRegex = /^Linux\s+/;
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line) return;
+
+                // 1. Parse Header: Linux 4.18... (hostname) date
+                if (headerRegex.test(line)) {
+                    const parts = line.split(/\s+/);
+                    // Linux version hostname date arch (cpu_count)
+                    if (parts.length >= 4) {
+                        fileObj.hostname = parts[2].replace(/[()]/g, '');
+                        fileObj.date = parts[3];
+                    }
+                    return;
+                }
+
+                // 2. Detect Section Headers
+                // A section header usually starts with a time format, followed by text headers (not numbers)
+                // Exception: "Average:" lines, we usually ignore them for time charts, or "00:00:01" followed by headers
+                // Heuristic: If line starts with Time, and subsequent parts are NOT numbers, it's a header.
+                if (timeRegex.test(line)) {
+                    const parts = line.split(/\s+/);
+                    const potentialTime = parts[0];
+                    const secondCol = parts[1];
+
+                    // Check if second column is a number (data) or text (header)
+                    // Note: 'CPU', 'IFACE', 'DEV', 'tps' are typically headers.
+                    if (isNaN(parseFloat(secondCol)) && secondCol !== 'all') {
+                        // It's a header row
+                        // Determine Section Name based on identifying columns
+                        // Common patterns:
+                        // CPU section: 2nd col is 'CPU' or 'proc/s'
+                        // Disk: 2nd col 'DEV'
+                        // Net: 2nd col 'IFACE'
+                        // Memory: kbmemfree etc (sometimes no explicit ID column, metrics start immediately)
+                        
+                        let keyColIndex = 1; // Default index for the "Instance" identifier
+                        let sectionKey = secondCol; // Default section name
+
+                        // Normalize common sar sections
+                        if (parts.includes('CPU')) {
+                            sectionKey = 'CPU Usage';
+                            keyColIndex = parts.indexOf('CPU');
+                        } else if (parts.includes('IFACE')) {
+                            sectionKey = 'Network';
+                            keyColIndex = parts.indexOf('IFACE');
+                        } else if (parts.includes('DEV')) {
+                            sectionKey = 'Disk I/O';
+                            keyColIndex = parts.indexOf('DEV');
+                        } else if (parts.includes('runq-sz')) {
+                            sectionKey = 'Queue & Load';
+                            keyColIndex = -1; // No specific instance, global stats
+                        } else if (parts.includes('kbmemfree')) {
+                            sectionKey = 'Memory';
+                            keyColIndex = -1;
+                        } else if (parts.includes('tps')) {
+                            // Generic I/O without DEV prefix? rare in modern sar
+                            sectionKey = 'I/O';
+                        }
+
+                        currentSectionName = sectionKey;
+                        currentSectionColumns = parts.slice(1); // Exclude time
+                        
+                        // Initialize section in data structure if not exists
+                        if (!fileObj.sections[currentSectionName]) {
+                            fileObj.sections[currentSectionName] = {
+                                columns: currentSectionColumns,
+                                keyIndex: keyColIndex - 1, // Adjust for 0-based index after slicing time
+                                instances: {}
+                            };
+                        }
+                        return; // Done processing header
+                    }
+
+                    // 3. Process Data Row
+                    if (currentSectionName && currentSectionColumns) {
+                        // If it's data, we map values to columns
+                        // Ignore "Average:" lines
+                        if (line.startsWith('Average:')) return;
+
+                        const rowParts = line.split(/\s+/);
+                        const time = rowParts[0];
+                        const values = rowParts.slice(1);
+
+                        // If column counts mismatch, abort this line (simple validation)
+                        if (values.length !== currentSectionColumns.length) return;
+
+                        const sectionDef = fileObj.sections[currentSectionName];
+                        let instanceName = 'default';
+
+                        // Extract Instance Name (e.g., 'all', '0', 'eth0', 'sda')
+                        if (sectionDef.keyIndex >= 0) {
+                            instanceName = values[sectionDef.keyIndex];
+                        }
+
+                        if (!sectionDef.instances[instanceName]) {
+                            sectionDef.instances[instanceName] = [];
+                        }
+
+                        // Map metrics
+                        const metricObj = { time: time };
+                        sectionDef.columns.forEach((col, idx) => {
+                            // Don't map the key column itself as a metric value usually, but strictly keeping all is safer
+                            // Try parsing as float
+                            const val = parseFloat(values[idx]);
+                            metricObj[col] = isNaN(val) ? values[idx] : val;
+                        });
+
+                        sectionDef.instances[instanceName].push(metricObj);
+                    }
+                }
+            });
+
+            // Post-processing: Generate a unique ID for this parsed file
+            const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
+            this.filesData[fileId] = fileObj;
+            return fileId;
+        }
+
+        getData() {
+            return this.filesData;
+        }
+    }
+
+    /**
+     * UI & Chart Logic
+     */
+    const parser = new SarParser();
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileListDisplay = document.getElementById('file-list-display');
+    const errorDisplay = document.getElementById('error-display');
+    
+    // Selectors
+    const fileSelect = document.getElementById('file-select');
+    const sectionSelect = document.getElementById('section-select');
+    const itemSelect = document.getElementById('item-select');
+    const metricSelect = document.getElementById('metric-select');
+
+    // Chart
+    let myChart = null;
+
+    // Drag & Drop Handlers
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function handleFiles(files) {
+        errorDisplay.style.display = 'none';
+        let processedCount = 0;
+        const totalFiles = files.length;
+        const fileNames = [];
+
+        Array.from(files).forEach(file => {
+            fileNames.push(file.name);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const fileId = parser.parseFile(file.name, e.target.result);
+                    addOption(fileSelect, fileId, fileId);
+                } catch (err) {
+                    console.error(err);
+                    showError(`無法解析檔案 ${file.name}`);
+                } finally {
+                    processedCount++;
+                    if (processedCount === totalFiles) {
+                        updateUIState();
+                    }
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        fileListDisplay.textContent = `已載入: ${fileNames.join(', ')}`;
+    }
+
+    function addOption(selectElement, text, value) {
+        // Clear default "Please upload" if it exists
+        if (selectElement.options[0] && selectElement.options[0].text.includes('請先上傳')) {
+            selectElement.innerHTML = '';
+            selectElement.disabled = false;
+        }
+        // Avoid duplicates
+        for (let i = 0; i < selectElement.options.length; i++) {
+            if (selectElement.options[i].value === value) return;
+        }
+        const option = document.createElement('option');
+        option.text = text;
+        option.value = value;
+        selectElement.add(option);
+        
+        // Trigger event if it's the first real option
+        if (selectElement.options.length === 1) {
+            selectElement.dispatchEvent(new Event('change'));
+        }
+    }
+
+    function updateUIState() {
+        // Trigger chain update starting from File Select
+        if (fileSelect.options.length > 0) {
+            fileSelect.dispatchEvent(new Event('change'));
+        }
+    }
+
+    function showError(msg) {
+        errorDisplay.textContent = msg;
+        errorDisplay.style.display = 'block';
+    }
+
+    // Event Listeners for Selectors
+    fileSelect.addEventListener('change', () => {
+        const fileId = fileSelect.value;
+        const data = parser.getData()[fileId];
+        
+        sectionSelect.innerHTML = '';
+        itemSelect.innerHTML = '';
+        metricSelect.innerHTML = '';
+        
+        if (!data) return;
+
+        const sections = Object.keys(data.sections);
+        sections.forEach(sec => {
+            const opt = document.createElement('option');
+            opt.value = sec;
+            opt.text = sec;
+            sectionSelect.add(opt);
+        });
+        sectionSelect.disabled = false;
+        
+        if (sections.length > 0) {
+            // Default to CPU if available
+            if (sections.includes('CPU Usage')) sectionSelect.value = 'CPU Usage';
+            sectionSelect.dispatchEvent(new Event('change'));
+        }
+    });
+
+    sectionSelect.addEventListener('change', () => {
+        const fileId = fileSelect.value;
+        const sectionName = sectionSelect.value;
+        const data = parser.getData()[fileId].sections[sectionName];
+
+        itemSelect.innerHTML = '';
+        metricSelect.innerHTML = '';
+
+        if (!data) return;
+
+        // Populate Instances (e.g., all, 0, 1)
+        const instances = Object.keys(data.instances);
+        instances.forEach(inst => {
+            const opt = document.createElement('option');
+            opt.value = inst;
+            opt.text = inst;
+            itemSelect.add(opt);
+        });
+        itemSelect.disabled = false;
+
+        // Populate Metrics (Columns excluding identifying columns)
+        // Identify numeric columns only
+        const sampleInstance = instances[0];
+        if (sampleInstance) {
+            const sampleData = data.instances[sampleInstance][0];
+            data.columns.forEach(col => {
+                // Filter out non-numeric identifying columns (like CPU, DEV)
+                if (typeof sampleData[col] === 'number') {
+                    const opt = document.createElement('option');
+                    opt.value = col;
+                    opt.text = col;
+                    metricSelect.add(opt);
+                }
+            });
+        }
+        metricSelect.disabled = false;
+
+        // Default selections
+        if (instances.includes('all')) itemSelect.value = 'all';
+        // Select common metrics by default
+        const commonMetrics = ['%usr', '%util', 'rxkB/s', 'runq-sz'];
+        for (const m of commonMetrics) {
+            for(let i=0; i<metricSelect.options.length; i++) {
+                if(metricSelect.options[i].value === m) {
+                    metricSelect.value = m;
+                    break;
+                }
+            }
+        }
+
+        renderChart();
+    });
+
+    itemSelect.addEventListener('change', renderChart);
+    metricSelect.addEventListener('change', renderChart);
+
+    function renderChart() {
+        const fileId = fileSelect.value;
+        const sectionName = sectionSelect.value;
+        const instanceName = itemSelect.value;
+        const metricName = metricSelect.value;
+
+        if (!fileId || !sectionName || !instanceName || !metricName) return;
+
+        const dataObj = parser.getData()[fileId];
+        const sectionData = dataObj.sections[sectionName];
+        const timeSeries = sectionData.instances[instanceName];
+
+        if (!timeSeries || timeSeries.length === 0) return;
+
+        // Prepare Chart Data
+        const labels = timeSeries.map(d => d.time);
+        const values = timeSeries.map(d => d[metricName]);
+
+        const ctx = document.getElementById('sarChart').getContext('2d');
+
+        if (myChart) {
+            myChart.destroy();
+        }
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: `${instanceName} - ${metricName}`,
+                    data: values,
+                    borderColor: '#0056b3',
+                    backgroundColor: 'rgba(0, 86, 179, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `${dataObj.hostname} (${dataObj.date}) - ${sectionName}`
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${context.parsed.y}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: metricName
+                        },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+</script>
+
+</body>
+</html>
