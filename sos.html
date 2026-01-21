@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18 (SAR + Fixes)</title>
+    <title>RHEL SOS Analyzer v18.1 (Fixed & SAR)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.1</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -232,10 +232,9 @@
                 ip: [/ip_-o_addr$/, /ip_addr$/, /ip_address$/, /ip_a$/, /ifconfig$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
-                // FIXED: stricter regex to avoid 'disable_on_free'
+                // Logic: Must end with /free or be exactly free, avoids disable_on_free
                 free: [/\/sos_commands\/memory\/free$/, /(^|\/)free$/], 
                 meminfo: [/proc\/meminfo$/, /meminfo$/],
-                // NEW: SAR rule
                 sar: [/\/sos_commands\/sar\/sar_-A$/, /sar_-A$/, /sa\/sar$/] 
             }
         };
@@ -243,9 +242,10 @@
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('dir-input');
 
+        // Fixed Event Listeners (Removed syntax error)
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
         dropZone.addEventListener('drop', async (e) => {
             e.preventDefault(); dropZone.classList.remove('drag-over');
             const items = e.dataTransfer.items;
@@ -415,17 +415,15 @@
             let section = null; // 'CPU', 'MEM', or null
             let colMap = {};
 
-            // Helper to clean and split line
             const splitL = (l) => l.trim().split(/\s+/);
 
             for (let i = 0; i < lines.length; i++) {
                 const l = lines[i].trim();
                 if (!l) continue;
-                if (l.startsWith('Average:')) continue; // Skip averages
+                if (l.startsWith('Average:')) continue; 
 
                 const parts = splitL(l);
                 
-                // Header detection
                 if (l.includes('%user') && l.includes('%idle')) {
                     section = 'CPU';
                     colMap = { user: parts.indexOf('%user'), sys: parts.indexOf('%system'), io: parts.indexOf('%iowait') };
@@ -437,36 +435,25 @@
                     continue;
                 }
                 if (l.includes('kbswpused') || l.includes('dev1-0') || l.includes('tps')) {
-                    section = null; // Reset on other sections
+                    section = null; 
                     continue;
                 }
 
-                // Data parsing
-                // Heuristic: Line must start with time (HH:MM:SS)
                 if (!parts[0].includes(':')) continue;
 
                 if (section === 'CPU') {
-                    // Filter: Only take "all" CPU rows if explicit, or implicit if no CPU column
-                    // RHEL sar: Time [AM/PM] CPU %user ...
-                    // If "CPU" column exists and is not "all", skip
                     let offset = 0;
-                    if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1; // Handle 12hr format
+                    if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     
                     const cpuColVal = parts[1 + offset];
-                    // If cpuColVal is a number (like '0'), it's a specific core -> skip. 
-                    // If it's 'all' -> keep. 
-                    // If it's the data immediately (older sar) -> keep.
-                    if (isNaN(parseFloat(cpuColVal)) && cpuColVal !== 'all') continue; // Skip header repetition
-                    if (!isNaN(parseFloat(cpuColVal)) && parseFloat(cpuColVal) % 1 === 0 && parts.length > 8) continue; // Likely specific core ID
+                    if (isNaN(parseFloat(cpuColVal)) && cpuColVal !== 'all') continue; 
+                    if (!isNaN(parseFloat(cpuColVal)) && parseFloat(cpuColVal) % 1 === 0 && parts.length > 8) continue; 
                     
-                    // Map data
                     const idxUser = colMap.user + offset; 
                     if (parts[idxUser]) {
-                         // Only push unique timestamps to prevent duplicates from multiple passes
                          const t = parts[0] + (offset ? ' ' + parts[1] : '');
                          if (timestamps.indexOf(t) === -1) timestamps.push(t);
                          
-                         // We only graph CPU data for the first "pass" (CPU all) found
                          if (timestamps.length > cpuData.user.length) {
                              cpuData.user.push(parseFloat(parts[idxUser]));
                              cpuData.system.push(parseFloat(parts[colMap.sys + offset]));
@@ -479,13 +466,11 @@
                     if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     const idxMem = colMap.mem + offset;
                     if (parts[idxMem]) {
-                        // Align memory data to existing timestamps if possible, or simple push
                         memData.used.push(parseFloat(parts[idxMem]));
                     }
                 }
             }
 
-            // Render Charts
             if (timestamps.length > 0) {
                 const ctxCpu = document.getElementById('sarCpuChart').getContext('2d');
                 App.sarCpuChart = new Chart(ctxCpu, {
@@ -503,7 +488,6 @@
             }
 
             if (memData.used.length > 0) {
-                // Adjust labels length match
                 const memLabels = timestamps.slice(0, memData.used.length);
                 const ctxMem = document.getElementById('sarMemChart').getContext('2d');
                 App.sarMemChart = new Chart(ctxMem, {
@@ -519,11 +503,9 @@
 
         // --- Memory Chart (Fixed) ---
         async function runMemoryAnalysis() {
-            // Updated regex logic now prevents grabbing disable_on_free
             let mem = await findAndRead('free');
             let total = 0, used = 0, free = 0, buff = 0, src = '';
             
-            // Validation: Ensure content looks like free output
             if (mem.content && !mem.content.includes('Mem:')) mem.content = null;
 
             if (mem.content) {
@@ -533,9 +515,8 @@
                 if (memLine) {
                     const parts = memLine.trim().split(/\s+/);
                     total = parseFloat(parts[1]); used = parseFloat(parts[2]); free = parseFloat(parts[3]); 
-                    // 'shared' is 4, 'buff/cache' is 5
                     if (parts.length > 6) buff = parseFloat(parts[5]); 
-                    else buff = 0; // fallback
+                    else buff = 0;
                 }
             } else {
                 mem = await findAndRead('meminfo');
@@ -673,7 +654,6 @@
             document.querySelectorAll('.nav-link').forEach(e=>e.classList.remove('active'));
             const nav = Array.from(document.querySelectorAll('.nav-link')).find(n=>n.getAttribute('onclick').includes(id));
             if(nav) nav.classList.add('active');
-            // Resize charts when tab becomes visible
             if(id === 'sar' && App.sarCpuChart) { App.sarCpuChart.resize(); App.sarMemChart.resize(); }
             if(id === 'dashboard' && App.memChart) App.memChart.resize();
         }
