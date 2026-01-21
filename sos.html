@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18.7 (RHEL8 Netstat Fix)</title>
+    <title>RHEL SOS Analyzer v19 (Deep Scan)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.7</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v19</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -236,12 +236,11 @@
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
                 
-                // FIXED: Revert to broad netstat matching to catch 'netstat_-neopa' etc.
-                // Since 'ss' is explicitly useless (ss_-s) in RHEL 8, we rely on netstat.
+                // UPDATED (v19): Broadened search to catch 'ss_-peaon', 'netstat_-neopa', etc.
+                // We will filter out the "garbage" (stats) in the content validator.
                 netstat: [/netstat/], 
-                
-                // Strict SS matching: Must be 'ss' or 'ss_-...' to avoid 'openssl.cnf'
-                ss: [/(^|\/)ss$/, /(^|\/)ss_-.*$/],
+                ss: [/ss/],
+                lsof: [/lsof/], // Fallback if networking tools missing
                 
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
@@ -356,6 +355,7 @@
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length === 0) return { content: null, path: null };
             
+            // Prefer files with longer names (e.g., ss_-peaon > ss) as short ones are often stats
             matches.sort((a, b) => b.length - a.length);
             
             for (let path of matches) {
@@ -369,29 +369,27 @@
             return { content: null, path: null };
         }
 
-        // --- Network Analysis (RESTORED logic + Strict blacklist) ---
+        // --- Network Analysis (v19: Smart Content Filtering) ---
         async function runNetwork() {
             const isValidPortList = (text) => {
                 if (text.length < 50) return false;
 
-                // 1. BLACKLIST: Explicitly exclude files that are definitely NOT port lists
-                // Exclude 'ss -s' summary output (RHEL 8 ss_-s)
-                if (text.startsWith('Total:') && text.includes('TCP:')) return false;
-
-                // Exclude OpenSSL Configs (which contain 'stateOrProvinceName')
-                if (text.includes('stateOrProvinceName') || text.includes('organizationalUnitName')) return false;
+                // 1. BLACKLIST (CRITICAL: exclude Stats and Configs)
+                if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false; // SNMP Stats
+                if (text.startsWith('Total:') && text.includes('TCP:')) return false; // ss -s stats
+                if (text.includes('stateOrProvinceName')) return false; // OpenSSL Config
                 if (text.includes('BEGIN CERTIFICATE')) return false; 
                 
-                // Exclude other stats
-                if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false;
+                // 2. WHITELIST (Must look like a list)
+                // SS header: Netid State Recv-Q Send-Q Local Address:Port
+                // Netstat header: Proto Recv-Q Send-Q Local Address
+                // Lsof header: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+                const hasHeaders = text.includes('Proto') || text.includes('Netid') || text.includes('State') || text.includes('Recv-Q') || text.includes('COMMAND');
+                
+                // Must have at least one listening port or connection
+                const hasContent = text.includes('LISTEN') || text.includes('ESTAB') || text.includes('UNCONN') || text.includes('UDP');
 
-                // 2. WHITELIST: Must have some indication of network connections
-                // Look for standard headers found in `netstat -neopa` or `ss -lntu`
-                const hasHeaders = text.includes('Proto') || text.includes('Netid') || text.includes('State') || text.includes('Recv-Q') || text.includes('Local Address');
-                // Look for connection states (Listen, Established, or Unconnected)
-                const hasStates = text.includes('LISTEN') || text.includes('ESTAB') || text.includes('UNCONN') || text.includes('Active Internet connections');
-
-                return hasHeaders && hasStates;
+                return hasHeaders && hasContent;
             };
 
             const net = await findAndRead('netstat', isValidPortList);
@@ -400,14 +398,22 @@
             const ss = await findAndRead('ss', isValidPortList);
             if (ss.content) App.netData.ss = { content: ss.content, path: ss.path };
 
+            // Backup: lsof
+            const lsof = await findAndRead('lsof', isValidPortList);
+            
             if (App.netData.netstat) {
                 document.getElementById('btn-netstat').checked = true;
                 renderNetwork('netstat');
             } else if (App.netData.ss) {
                 document.getElementById('btn-ss').checked = true;
                 renderNetwork('ss');
+            } else if (lsof.content) {
+                 // Create a fake SS object for lsof content so we can display it
+                 App.netData.ss = { content: lsof.content, path: lsof.path };
+                 document.getElementById('btn-ss').checked = true;
+                 renderNetwork('ss');
             } else {
-                document.getElementById('net-ss').textContent = "No valid Port list found.\n(Searched for 'netstat' or 'ss' files excluding stats/configs)";
+                document.getElementById('net-ss').textContent = "No valid Port list found.\n(Ignored stats files like 'TcpExt', 'ss -s', etc.)";
                 showSrc('src-ss', null);
             }
 
@@ -427,7 +433,8 @@
                 const headers = lines.filter(l => l.includes('Proto'));
                 output = [...headers, ...lines.filter(l => l.includes('LISTEN') || (l.includes('udp') && !l.includes('ESTAB')))].join('\n');
             } else {
-                output = lines.filter(l => l.includes('State') || l.includes('LISTEN') || l.includes('UNCONN')).join('\n');
+                // Filter logic for SS and LSOF
+                output = lines.filter(l => l.includes('State') || l.includes('LISTEN') || l.includes('UNCONN') || l.includes('COMMAND')).join('\n');
             }
             if (output.length < 50) output = lines.slice(0, 50).join('\n'); 
             document.getElementById('net-ss').textContent = output;
