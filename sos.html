@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v17 (RHEL8 Fix)</title>
+    <title>RHEL SOS Analyzer v18 (SAR + Fixes)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -21,7 +21,7 @@
         .source-badge { font-size: 0.75rem; color: #fff; background-color: #6c757d; padding: 2px 8px; border-radius: 4px; font-weight: normal; font-family: monospace; }
         .console-box { background: #2d2d3b; color: #e0e0e0; font-family: 'Consolas', monospace; padding: 15px; border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
         
-        /* Upload Area Fixed */
+        /* Upload Area */
         .upload-wrapper { height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .upload-box { border: 2px dashed #ccc; padding: 60px; border-radius: 16px; background: #fff; text-align: center; cursor: pointer; width: 600px; transition: all 0.2s; user-select: none; }
         .upload-box:hover, .upload-box.drag-over { border-color: var(--accent); background: #f0f8ff; transform: scale(1.02); }
@@ -39,16 +39,18 @@
         .log-item:hover { background: #e2e6ea; color: #0d6efd; }
         .log-item.active { background: #0d6efd; color: #fff; }
 
+        .chart-container { position: relative; height: 300px; width: 100%; }
         .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v17</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
+            <a class="nav-link" onclick="switchTab('sar')">📈 效能監控 (SAR)</a>
             <a class="nav-link" onclick="switchTab('kernel')">⚙️ 核心與模組 (Kernel)</a>
             <a class="nav-link" onclick="switchTab('network')">🌐 網路狀態 (Network)</a>
             <a class="nav-link" onclick="switchTab('logs')">📝 日誌瀏覽器 (Logs)</a>
@@ -108,6 +110,22 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-sar" class="content-view hidden">
+            <h4 class="mb-3">效能歷史 (SAR Analysis) <span class="source-badge" id="src-sar">Pending</span></h4>
+            <div class="card mb-3">
+                <div class="card-header">CPU Load History (%user / %system / %iowait)</div>
+                <div class="card-body">
+                    <div class="chart-container"><canvas id="sarCpuChart"></canvas></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Memory Usage History (%memused)</div>
+                <div class="card-body">
+                    <div class="chart-container"><canvas id="sarMemChart"></canvas></div>
                 </div>
             </div>
         </div>
@@ -198,14 +216,14 @@
     <script>
         const App = {
             files: new Map(), filePaths: [], cache: {}, 
-            currentLogText: "", fullSysctlText: "", processList: [], memChart: null,
+            currentLogText: "", fullSysctlText: "", processList: [], 
+            memChart: null, sarCpuChart: null, sarMemChart: null,
             netData: { ss: null, netstat: null }, 
 
-            // Modified Rules: Relaxed matching for netstat and ss to catch files without underscores
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
-                netstat: [/netstat.*$/], // Fix: Matches 'netstat', 'netstat_-neopa', etc.
-                ss: [/ss.*$/],           // Fix: Matches 'ss', 'ss_-tulpn', etc.
+                netstat: [/netstat.*$/], 
+                ss: [/ss.*$/],
                 hostname: [/hostname$/],
                 release: [/redhat-release$/],
                 uptime: [/uptime$/],
@@ -214,23 +232,20 @@
                 ip: [/ip_-o_addr$/, /ip_addr$/, /ip_address$/, /ip_a$/, /ifconfig$/],
                 lsmod: [/lsmod$/],
                 sysctl: [/sysctl_-a$/],
-                free: [/sos_commands\/memory\/free$/, /free$/],
-                meminfo: [/proc\/meminfo$/, /meminfo$/]
+                // FIXED: stricter regex to avoid 'disable_on_free'
+                free: [/\/sos_commands\/memory\/free$/, /(^|\/)free$/], 
+                meminfo: [/proc\/meminfo$/, /meminfo$/],
+                // NEW: SAR rule
+                sar: [/\/sos_commands\/sar\/sar_-A$/, /sar_-A$/, /sa\/sar$/] 
             }
         };
 
-        // --- Interaction Logic (Fixed) ---
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('dir-input');
 
-        // Handle Click - Trigger Input
-        dropZone.addEventListener('click', () => {
-            fileInput.click();
-        });
-
-        // Handle Drag & Drop
+        dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'); });
         dropZone.addEventListener('drop', async (e) => {
             e.preventDefault(); dropZone.classList.remove('drag-over');
             const items = e.dataTransfer.items;
@@ -245,7 +260,6 @@
             startAnalysis();
         });
 
-        // Handle File Selection
         fileInput.addEventListener('change', async (e) => {
             const fileList = e.target.files;
             if (!fileList.length) return;
@@ -261,6 +275,8 @@
         function resetState() {
             App.files.clear(); App.filePaths = []; App.cache = {}; App.processList = []; App.netData = { ss: null, netstat: null };
             if (App.memChart) { App.memChart.destroy(); App.memChart = null; }
+            if (App.sarCpuChart) { App.sarCpuChart.destroy(); App.sarCpuChart = null; }
+            if (App.sarMemChart) { App.sarMemChart.destroy(); App.sarMemChart = null; }
         }
 
         async function traverseFileTree(item) {
@@ -301,7 +317,7 @@
                 document.getElementById('debug-list').textContent = log;
 
                 await Promise.all([
-                    runDashboard(), runMemoryAnalysis(), runHostInfo(), runKernel(), runNetwork(), buildLogTree()
+                    runDashboard(), runMemoryAnalysis(), runHostInfo(), runKernel(), runNetwork(), runSarAnalysis(), buildLogTree()
                 ]);
                 document.getElementById('view-upload').classList.add('hidden');
                 switchTab('dashboard');
@@ -313,15 +329,12 @@
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
             
-            // Fix: Filter to ensure we only grab files from relevant paths if possible, but keep it broad for now
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length === 0) return { content: null, path: null };
             
-            // Sort by length desc to prefer longer filenames (often more specific ones like ss_-tulnp vs ss)
             matches.sort((a, b) => b.length - a.length);
             
             for (let path of matches) {
-                // Ignore binary/stats files in sos_commands if better option exists, but logic handled by validator mostly
                 if (path.includes('sos_commands') && (path.includes('.gz') || path.includes('.xz'))) continue;
 
                 if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
@@ -332,24 +345,15 @@
             return { content: null, path: null };
         }
 
-        // --- Network Analysis (Strict Fix) ---
+        // --- Network Analysis ---
         async function runNetwork() {
-            // Strict Validation Function
             const isValidPortList = (text) => {
-                // 1. REJECT if content is too short or weird (Avoids "60")
                 if (text.length < 30) return false;
-
-                // 2. REJECT Statistics files
                 if (text.includes('TcpExt:') || text.includes('IpExt:') || text.includes('MPTcpExt:')) return false;
-                if (text.startsWith('Total:') && text.includes('TCP:')) return false; // SS -s output
-
-                // 3. REJECT VM Info
+                if (text.startsWith('Total:') && text.includes('TCP:')) return false;
                 if (text.includes('OS Type:') && text.includes('UUID:')) return false;
-
-                // 4. MUST HAVE Headers
                 const hasNetstatHeader = text.includes('Proto') && (text.includes('Address') || text.includes('Recv-Q'));
                 const hasSSHeader = (text.includes('State') || text.includes('ESTAB')) && (text.includes('Netid') || text.includes('Address'));
-                
                 return hasNetstatHeader || hasSSHeader;
             };
 
@@ -366,7 +370,7 @@
                 document.getElementById('btn-ss').checked = true;
                 renderNetwork('ss');
             } else {
-                document.getElementById('net-ss').textContent = "No valid Port list found.\n(Checked for valid netstat/ss output)";
+                document.getElementById('net-ss').textContent = "No valid Port list found.";
                 showSrc('src-ss', null);
             }
 
@@ -386,24 +390,152 @@
                 const headers = lines.filter(l => l.includes('Proto'));
                 output = [...headers, ...lines.filter(l => l.includes('LISTEN') || (l.includes('udp') && !l.includes('ESTAB')))].join('\n');
             } else {
-                // Simple filter for SS
                 output = lines.filter(l => l.includes('State') || l.includes('LISTEN') || l.includes('UNCONN')).join('\n');
             }
-            if (output.length < 50) output = lines.slice(0, 50).join('\n'); // Fallback if filter empty
+            if (output.length < 50) output = lines.slice(0, 50).join('\n'); 
             document.getElementById('net-ss').textContent = output;
         };
 
-        // --- Memory Chart ---
+        // --- SAR Analysis (NEW) ---
+        async function runSarAnalysis() {
+            const sar = await findAndRead('sar');
+            showSrc('src-sar', sar.path);
+            
+            if (!sar.content) {
+                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found in report. (Expected: sos_commands/sar/sar -A)</div>';
+                document.getElementById('sarMemChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
+                return;
+            }
+
+            const lines = sar.content.split('\n');
+            const timestamps = [];
+            const cpuData = { user: [], system: [], iowait: [] };
+            const memData = { used: [] };
+            
+            let section = null; // 'CPU', 'MEM', or null
+            let colMap = {};
+
+            // Helper to clean and split line
+            const splitL = (l) => l.trim().split(/\s+/);
+
+            for (let i = 0; i < lines.length; i++) {
+                const l = lines[i].trim();
+                if (!l) continue;
+                if (l.startsWith('Average:')) continue; // Skip averages
+
+                const parts = splitL(l);
+                
+                // Header detection
+                if (l.includes('%user') && l.includes('%idle')) {
+                    section = 'CPU';
+                    colMap = { user: parts.indexOf('%user'), sys: parts.indexOf('%system'), io: parts.indexOf('%iowait') };
+                    continue;
+                }
+                if ((l.includes('kbmemused') || l.includes('mbmemused')) && l.includes('%memused')) {
+                    section = 'MEM';
+                    colMap = { mem: parts.indexOf('%memused') };
+                    continue;
+                }
+                if (l.includes('kbswpused') || l.includes('dev1-0') || l.includes('tps')) {
+                    section = null; // Reset on other sections
+                    continue;
+                }
+
+                // Data parsing
+                // Heuristic: Line must start with time (HH:MM:SS)
+                if (!parts[0].includes(':')) continue;
+
+                if (section === 'CPU') {
+                    // Filter: Only take "all" CPU rows if explicit, or implicit if no CPU column
+                    // RHEL sar: Time [AM/PM] CPU %user ...
+                    // If "CPU" column exists and is not "all", skip
+                    let offset = 0;
+                    if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1; // Handle 12hr format
+                    
+                    const cpuColVal = parts[1 + offset];
+                    // If cpuColVal is a number (like '0'), it's a specific core -> skip. 
+                    // If it's 'all' -> keep. 
+                    // If it's the data immediately (older sar) -> keep.
+                    if (isNaN(parseFloat(cpuColVal)) && cpuColVal !== 'all') continue; // Skip header repetition
+                    if (!isNaN(parseFloat(cpuColVal)) && parseFloat(cpuColVal) % 1 === 0 && parts.length > 8) continue; // Likely specific core ID
+                    
+                    // Map data
+                    const idxUser = colMap.user + offset; 
+                    if (parts[idxUser]) {
+                         // Only push unique timestamps to prevent duplicates from multiple passes
+                         const t = parts[0] + (offset ? ' ' + parts[1] : '');
+                         if (timestamps.indexOf(t) === -1) timestamps.push(t);
+                         
+                         // We only graph CPU data for the first "pass" (CPU all) found
+                         if (timestamps.length > cpuData.user.length) {
+                             cpuData.user.push(parseFloat(parts[idxUser]));
+                             cpuData.system.push(parseFloat(parts[colMap.sys + offset]));
+                             cpuData.iowait.push(parseFloat(parts[colMap.io + offset]));
+                         }
+                    }
+                }
+                else if (section === 'MEM') {
+                    let offset = 0;
+                    if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
+                    const idxMem = colMap.mem + offset;
+                    if (parts[idxMem]) {
+                        // Align memory data to existing timestamps if possible, or simple push
+                        memData.used.push(parseFloat(parts[idxMem]));
+                    }
+                }
+            }
+
+            // Render Charts
+            if (timestamps.length > 0) {
+                const ctxCpu = document.getElementById('sarCpuChart').getContext('2d');
+                App.sarCpuChart = new Chart(ctxCpu, {
+                    type: 'line',
+                    data: {
+                        labels: timestamps,
+                        datasets: [
+                            { label: '%User', data: cpuData.user, borderColor: '#0d6efd', fill: false, tension: 0.1 },
+                            { label: '%System', data: cpuData.system, borderColor: '#dc3545', fill: false, tension: 0.1 },
+                            { label: '%IOWait', data: cpuData.iowait, borderColor: '#ffc107', fill: false, tension: 0.1 }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false } }
+                });
+            }
+
+            if (memData.used.length > 0) {
+                // Adjust labels length match
+                const memLabels = timestamps.slice(0, memData.used.length);
+                const ctxMem = document.getElementById('sarMemChart').getContext('2d');
+                App.sarMemChart = new Chart(ctxMem, {
+                    type: 'line',
+                    data: {
+                        labels: memLabels,
+                        datasets: [{ label: '% MemUsed', data: memData.used, borderColor: '#198754', backgroundColor: 'rgba(25, 135, 84, 0.1)', fill: true, tension: 0.1 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } } }
+                });
+            }
+        }
+
+        // --- Memory Chart (Fixed) ---
         async function runMemoryAnalysis() {
+            // Updated regex logic now prevents grabbing disable_on_free
             let mem = await findAndRead('free');
             let total = 0, used = 0, free = 0, buff = 0, src = '';
+            
+            // Validation: Ensure content looks like free output
+            if (mem.content && !mem.content.includes('Mem:')) mem.content = null;
+
             if (mem.content) {
                 src = mem.path;
                 const lines = mem.content.split('\n');
-                const memLine = lines.find(l => l.startsWith('Mem:'));
+                const memLine = lines.find(l => l.trim().startsWith('Mem:'));
                 if (memLine) {
-                    const parts = memLine.split(/\s+/);
-                    total = parseFloat(parts[1]); used = parseFloat(parts[2]); free = parseFloat(parts[3]); buff = parseFloat(parts[5]);
+                    const parts = memLine.trim().split(/\s+/);
+                    total = parseFloat(parts[1]); used = parseFloat(parts[2]); free = parseFloat(parts[3]); 
+                    // 'shared' is 4, 'buff/cache' is 5
+                    if (parts.length > 6) buff = parseFloat(parts[5]); 
+                    else buff = 0; // fallback
                 }
             } else {
                 mem = await findAndRead('meminfo');
@@ -418,7 +550,10 @@
                 renderMemChart(used, free, buff);
                 const toGB = (v) => (v / 1024 / 1024).toFixed(1) + ' GB';
                 document.getElementById('mem-text').innerHTML = `Total: ${toGB(total)}<br>Used: ${toGB(used)} | Free: ${toGB(free)} | Cache: ${toGB(buff)}`;
-            } else { document.getElementById('mem-text').textContent = "No data"; }
+            } else { 
+                document.getElementById('mem-text').textContent = "No data (Check 'free' or 'meminfo')"; 
+                if (App.memChart) App.memChart.destroy();
+            }
         }
 
         function renderMemChart(used, free, buff) {
@@ -538,6 +673,9 @@
             document.querySelectorAll('.nav-link').forEach(e=>e.classList.remove('active'));
             const nav = Array.from(document.querySelectorAll('.nav-link')).find(n=>n.getAttribute('onclick').includes(id));
             if(nav) nav.classList.add('active');
+            // Resize charts when tab becomes visible
+            if(id === 'sar' && App.sarCpuChart) { App.sarCpuChart.resize(); App.sarMemChart.resize(); }
+            if(id === 'dashboard' && App.memChart) App.memChart.resize();
         }
     </script>
 </body>
