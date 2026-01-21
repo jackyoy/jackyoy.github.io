@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18.2 (SAR Path Fixed)</title>
+    <title>RHEL SOS Analyzer v18.3 (SAR Format Fix)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.2</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.3</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -234,13 +234,11 @@
                 sysctl: [/sysctl_-a$/],
                 free: [/\/sos_commands\/memory\/free$/, /(^|\/)free$/], 
                 meminfo: [/proc\/meminfo$/, /meminfo$/],
-                // FIXED: Now catches sar08, sar15, etc. in var/log/sa, plus standard sar -A
-                // Added regex for daily sar files: .../var/log/sa/sarXX
                 sar: [
-                    /sar_-A$/,                   // Standard big report
-                    /sos_commands\/sar\/sar.*$/, // Fallback for various sar dumps
-                    /var\/log\/sa\/sar\d+$/,     // Target: var/log/sa/sar08 (Daily text reports)
-                    /sa\/sar$/                   // Other variations
+                    /sar_-A$/,                   
+                    /sos_commands\/sar\/sar.*$/, 
+                    /var\/log\/sa\/sar\d+$/,     
+                    /sa\/sar$/                   
                 ] 
             }
         };
@@ -334,16 +332,12 @@
             const regexList = App.rules[ruleKey];
             if (!regexList) return { content: null, path: null };
             
-            // Filter files based on rules
             const matches = App.filePaths.filter(p => regexList.some(r => r.test(p)));
             if (matches.length === 0) return { content: null, path: null };
             
-            // Sort matches to prioritize deeper paths or specific names if needed
-            // For SAR, we prefer 'sar08' (text) over 'sa08' (binary), regex handles this by matching 'sar'
             matches.sort((a, b) => b.length - a.length);
             
             for (let path of matches) {
-                // Skip compressed files
                 if (path.includes('.gz') || path.includes('.xz')) continue;
 
                 if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
@@ -405,16 +399,16 @@
             document.getElementById('net-ss').textContent = output;
         };
 
-        // --- SAR Analysis (Fixed for sarXX files) ---
+        // --- SAR Analysis (Fixed for Abbreviated Headers) ---
         async function runSarAnalysis() {
-            // Validator: Ensure it's text and has headers (excludes XML or binary garbage)
-            const isSarText = (t) => (t.includes('%user') || t.includes('CPU') || t.includes('%memused')) && !t.includes('<?xml');
+            // Validator: text file with headers
+            const isSarText = (t) => (t.includes('CPU') || t.includes('%usr') || t.includes('%user')) && !t.includes('<?xml');
 
             const sar = await findAndRead('sar', isSarText);
             showSrc('src-sar', sar.path);
             
             if (!sar.content) {
-                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found. (Checked sar-A and var/log/sa/sarXX)</div>';
+                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
                 document.getElementById('sarMemChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
                 return;
             }
@@ -436,39 +430,52 @@
 
                 const parts = splitL(l);
                 
-                // Flexible header detection
-                if (l.includes('%user') && (l.includes('%idle') || l.includes('%system'))) {
+                // --- FIXED: Flexible Header Detection (%user or %usr, %system or %sys) ---
+                if ((l.includes('%user') || l.includes('%usr')) && (l.includes('%idle') || l.includes('%system') || l.includes('%sys'))) {
                     section = 'CPU';
-                    // Dynamic column mapping in case order changes
-                    colMap = { 
-                        user: parts.indexOf('%user'), 
-                        sys: parts.indexOf('%system'), 
-                        io: parts.indexOf('%iowait') 
-                    };
-                    if (colMap.user === -1) section = null; // Abort if critical col missing
+                    
+                    // Determine indices dynamically
+                    let idxUser = parts.indexOf('%user');
+                    if (idxUser === -1) idxUser = parts.indexOf('%usr'); // Fallback to abbr
+                    
+                    let idxSys = parts.indexOf('%system');
+                    if (idxSys === -1) idxSys = parts.indexOf('%sys');   // Fallback to abbr
+
+                    let idxIo = parts.indexOf('%iowait');
+
+                    colMap = { user: idxUser, sys: idxSys, io: idxIo };
+                    
+                    // Abort if critical column still missing
+                    if (colMap.user === -1) section = null; 
                     continue;
                 }
-                if ((l.includes('kbmemused') || l.includes('mbmemused')) && l.includes('%memused')) {
+
+                // Memory Header Detection
+                // Check for 'kbmemused' OR 'mbmemused' OR just '%memused'
+                if ((l.includes('kbmemused') || l.includes('mbmemused') || l.includes('%memused')) && (l.includes('%memused') || l.includes('kbmemfree'))) {
                     section = 'MEM';
                     colMap = { mem: parts.indexOf('%memused') };
+                    if (colMap.mem === -1) section = null;
                     continue;
                 }
-                // Reset on other section headers
-                if (l.includes('kbswpused') || l.includes('DEV') || l.includes('IFACE') || l.includes('tps')) {
+
+                // Reset on other sections
+                if (l.includes('kbswpused') || l.includes('DEV') || l.includes('IFACE') || l.includes('tps') || l.includes('filesystem')) {
                     section = null; 
                     continue;
                 }
 
-                // Data parsing: Must start with timestamp
-                // Timestamp regex: HH:MM:SS or HH:MM:SS AM/PM
+                // Data Parsing
                 if (!/^\d{2}:\d{2}:\d{2}/.test(parts[0])) continue;
 
                 if (section === 'CPU') {
                     let offset = 0;
                     if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     
-                    const cpuColVal = parts[1 + offset]; // usually CPU ID or 'all'
-                    // Filter: Skip specific cores, keep 'all' or implicit all
+                    // Check if row is for a specific CPU core (numeric) or 'all'
+                    const cpuColVal = parts[1 + offset]; 
+                    // If it is a number (specific core), skip it. Keep only 'all'.
+                    // Note: !isNaN('0') is true. !isNaN('all') is false.
                     if (!isNaN(parseFloat(cpuColVal)) && parts.length > 5) continue; 
                     
                     const idxUser = colMap.user + offset; 
@@ -476,7 +483,7 @@
                          const t = parts[0] + (offset ? ' ' + parts[1] : '');
                          if (timestamps.indexOf(t) === -1) timestamps.push(t);
                          
-                         // Sync data with timestamps length
+                         // Sync data arrays
                          if (timestamps.length > cpuData.user.length) {
                              cpuData.user.push(parseFloat(parts[idxUser]) || 0);
                              cpuData.system.push(parseFloat(parts[colMap.sys + offset]) || 0);
