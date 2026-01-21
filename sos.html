@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v18.3 (SAR Format Fix)</title>
+    <title>RHEL SOS Analyzer v18.4 (SAR Selector)</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -46,7 +46,7 @@
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.3</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer v18.4</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard')">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info')">🖥️ 系統資訊 (Host)</a>
@@ -115,9 +115,21 @@
         </div>
 
         <div id="view-sar" class="content-view hidden">
-            <h4 class="mb-3">效能歷史 (SAR Analysis) <span class="source-badge" id="src-sar">Pending</span></h4>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="mb-0">效能歷史 (SAR Analysis)</h4>
+                <div class="d-flex align-items-center">
+                    <label for="sar-select" class="me-2 small fw-bold text-secondary">Select Report:</label>
+                    <select id="sar-select" class="form-select form-select-sm" style="width: 250px;" onchange="loadSelectedSar(this.value)">
+                        <option value="">Searching...</option>
+                    </select>
+                </div>
+            </div>
+            
             <div class="card mb-3">
-                <div class="card-header">CPU Load History (%user / %system / %iowait)</div>
+                <div class="card-header d-flex justify-content-between">
+                    <span>CPU Load History (%user / %system / %iowait)</span>
+                    <span class="source-badge" id="src-sar">Pending</span>
+                </div>
                 <div class="card-body">
                     <div class="chart-container"><canvas id="sarCpuChart"></canvas></div>
                 </div>
@@ -219,6 +231,7 @@
             currentLogText: "", fullSysctlText: "", processList: [], 
             memChart: null, sarCpuChart: null, sarMemChart: null,
             netData: { ss: null, netstat: null }, 
+            sarFiles: [], // Store list of found SAR files
 
             rules: {
                 ps: [/ps_aux.*$/, /ps_auxwwwm$/], 
@@ -277,9 +290,11 @@
 
         function resetState() {
             App.files.clear(); App.filePaths = []; App.cache = {}; App.processList = []; App.netData = { ss: null, netstat: null };
+            App.sarFiles = [];
             if (App.memChart) { App.memChart.destroy(); App.memChart = null; }
             if (App.sarCpuChart) { App.sarCpuChart.destroy(); App.sarCpuChart = null; }
             if (App.sarMemChart) { App.sarMemChart.destroy(); App.sarMemChart = null; }
+            document.getElementById('sar-select').innerHTML = '<option value="">Searching...</option>';
         }
 
         async function traverseFileTree(item) {
@@ -320,7 +335,7 @@
                 document.getElementById('debug-list').textContent = log;
 
                 await Promise.all([
-                    runDashboard(), runMemoryAnalysis(), runHostInfo(), runKernel(), runNetwork(), runSarAnalysis(), buildLogTree()
+                    runDashboard(), runMemoryAnalysis(), runHostInfo(), runKernel(), runNetwork(), initializeSarSelector(), buildLogTree()
                 ]);
                 document.getElementById('view-upload').classList.add('hidden');
                 switchTab('dashboard');
@@ -399,21 +414,64 @@
             document.getElementById('net-ss').textContent = output;
         };
 
-        // --- SAR Analysis (Fixed for Abbreviated Headers) ---
-        async function runSarAnalysis() {
-            // Validator: text file with headers
-            const isSarText = (t) => (t.includes('CPU') || t.includes('%usr') || t.includes('%user')) && !t.includes('<?xml');
-
-            const sar = await findAndRead('sar', isSarText);
-            showSrc('src-sar', sar.path);
+        // --- SAR Selection Logic ---
+        async function initializeSarSelector() {
+            const sarRegexList = App.rules.sar;
+            // 1. Find all matching files
+            let candidates = App.filePaths.filter(p => sarRegexList.some(r => r.test(p)));
             
-            if (!sar.content) {
-                document.getElementById('sarCpuChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
-                document.getElementById('sarMemChart').parentNode.innerHTML = '<div class="alert alert-secondary">SAR data not found.</div>';
+            // 2. Filter out compressed files
+            candidates = candidates.filter(p => !p.includes('.gz') && !p.includes('.xz'));
+            
+            // 3. Sort candidates (sar08, sar09, sar10...)
+            candidates.sort();
+
+            App.sarFiles = candidates;
+            const selectEl = document.getElementById('sar-select');
+            selectEl.innerHTML = '';
+
+            if (candidates.length === 0) {
+                selectEl.innerHTML = '<option value="">No SAR files found</option>';
+                selectEl.disabled = true;
                 return;
             }
 
-            const lines = sar.content.split('\n');
+            selectEl.disabled = false;
+            candidates.forEach(path => {
+                const opt = document.createElement('option');
+                opt.value = path;
+                // Show simple name in dropdown
+                opt.textContent = path.split('/').pop(); 
+                selectEl.appendChild(opt);
+            });
+
+            // Auto-load the last one (usually latest date) or the first one
+            // Ideally last one if they are sorted by date
+            const defaultFile = candidates[candidates.length - 1];
+            selectEl.value = defaultFile;
+            loadSelectedSar(defaultFile);
+        }
+
+        window.loadSelectedSar = async function(path) {
+            if (!path) return;
+            
+            if (!App.cache[path]) App.cache[path] = await App.files.get(path).text();
+            const content = App.cache[path];
+            
+            // Simple validation before parsing
+            const isSarText = (t) => (t.includes('CPU') || t.includes('%usr') || t.includes('%user')) && !t.includes('<?xml');
+            
+            if (!isSarText(content)) {
+                alert("Selected file does not appear to be a valid text SAR report.");
+                return;
+            }
+
+            renderSarCharts(content, path);
+        };
+
+        function renderSarCharts(content, path) {
+            showSrc('src-sar', path);
+            const lines = content.split('\n');
             const timestamps = [];
             const cpuData = { user: [], system: [], iowait: [] };
             const memData = { used: [] };
@@ -430,36 +488,24 @@
 
                 const parts = splitL(l);
                 
-                // --- FIXED: Flexible Header Detection (%user or %usr, %system or %sys) ---
+                // Header Detection
                 if ((l.includes('%user') || l.includes('%usr')) && (l.includes('%idle') || l.includes('%system') || l.includes('%sys'))) {
                     section = 'CPU';
-                    
-                    // Determine indices dynamically
                     let idxUser = parts.indexOf('%user');
-                    if (idxUser === -1) idxUser = parts.indexOf('%usr'); // Fallback to abbr
-                    
+                    if (idxUser === -1) idxUser = parts.indexOf('%usr'); 
                     let idxSys = parts.indexOf('%system');
-                    if (idxSys === -1) idxSys = parts.indexOf('%sys');   // Fallback to abbr
-
+                    if (idxSys === -1) idxSys = parts.indexOf('%sys');   
                     let idxIo = parts.indexOf('%iowait');
-
                     colMap = { user: idxUser, sys: idxSys, io: idxIo };
-                    
-                    // Abort if critical column still missing
                     if (colMap.user === -1) section = null; 
                     continue;
                 }
-
-                // Memory Header Detection
-                // Check for 'kbmemused' OR 'mbmemused' OR just '%memused'
                 if ((l.includes('kbmemused') || l.includes('mbmemused') || l.includes('%memused')) && (l.includes('%memused') || l.includes('kbmemfree'))) {
                     section = 'MEM';
                     colMap = { mem: parts.indexOf('%memused') };
                     if (colMap.mem === -1) section = null;
                     continue;
                 }
-
-                // Reset on other sections
                 if (l.includes('kbswpused') || l.includes('DEV') || l.includes('IFACE') || l.includes('tps') || l.includes('filesystem')) {
                     section = null; 
                     continue;
@@ -472,10 +518,7 @@
                     let offset = 0;
                     if (parts[1] === 'AM' || parts[1] === 'PM') offset = 1;
                     
-                    // Check if row is for a specific CPU core (numeric) or 'all'
                     const cpuColVal = parts[1 + offset]; 
-                    // If it is a number (specific core), skip it. Keep only 'all'.
-                    // Note: !isNaN('0') is true. !isNaN('all') is false.
                     if (!isNaN(parseFloat(cpuColVal)) && parts.length > 5) continue; 
                     
                     const idxUser = colMap.user + offset; 
@@ -483,7 +526,6 @@
                          const t = parts[0] + (offset ? ' ' + parts[1] : '');
                          if (timestamps.indexOf(t) === -1) timestamps.push(t);
                          
-                         // Sync data arrays
                          if (timestamps.length > cpuData.user.length) {
                              cpuData.user.push(parseFloat(parts[idxUser]) || 0);
                              cpuData.system.push(parseFloat(parts[colMap.sys + offset]) || 0);
@@ -500,6 +542,10 @@
                     }
                 }
             }
+
+            // Update Charts
+            if (App.sarCpuChart) App.sarCpuChart.destroy();
+            if (App.sarMemChart) App.sarMemChart.destroy();
 
             if (timestamps.length > 0) {
                 const ctxCpu = document.getElementById('sarCpuChart').getContext('2d');
