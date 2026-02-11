@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 分析與報表工具 (v5 Final)</title>
+    <title>RHEL SAR 分析與報表工具 (v6)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
@@ -97,10 +97,7 @@
             color: #999; font-size: 1.2rem; display: none;
         }
         
-        /* Critical Fix for PDF Generation: 
-           Use fixed position off-screen instead of display: none.
-           Chart.js requires the canvas to be part of the layout flow to render.
-        */
+        /* Critical Fix: Move canvas off-screen instead of hiding it */
         #pdf-canvas {
             position: fixed;
             left: -9999px;
@@ -112,7 +109,7 @@
 <body>
 
 <header>
-    <h1>RHEL SAR 分析與報表工具 (v5)</h1>
+    <h1>RHEL SAR 分析與報表工具 (v6)</h1>
     <button id="btn-pdf" class="btn-download">📥 下載 PDF 報表</button>
 </header>
 
@@ -152,7 +149,7 @@
 
 <script>
     /**
-     * SAR Parser Logic (v5 - Fixed & Robust)
+     * SAR Parser Logic (v6 - Robust & Permissive)
      */
     'use strict';
 
@@ -160,10 +157,17 @@
         constructor() { this.filesData = {}; }
 
         parseFile(fileName, content) {
+            // Fix: Strip BOM if present
+            if (content.charCodeAt(0) === 0xFEFF) {
+                content = content.slice(1);
+            }
+
             const lines = content.split(/\r?\n/);
             const fileObj = { date: '', hostname: '', sections: {} };
-            const timeRegex = /^\d{2}:\d{2}:\d{2}\s+/;
-            const headerRegex = /^Linux\s+/;
+            
+            // Fix: Regex now allows leading whitespace (\s*)
+            const timeRegex = /^\s*\d{2}:\d{2}:\d{2}\s+/;
+            const headerRegex = /Linux\s+/; // Looser check for header
             
             let currentSectionName = null;
             let currentColumns = null;
@@ -174,15 +178,17 @@
             const SECTION_MAP = {
                 'CPU': 'CPU Usage', 'IFACE': 'Network', 'DEV': 'Disk I/O',
                 'kbmemfree': 'Memory', 'runq-sz': 'Load / Queue', 'plist-sz': 'Process List',
-                'tps': 'I/O & Transfer', 'pgpgin': 'Paging', 'TTY': 'TTY'
+                'tps': 'I/O & Transfer', 'pgpgin': 'Paging', 'TTY': 'TTY',
+                'cswch/s': 'Context Switches'
             };
 
             lines.forEach(line => {
-                line = line.trim();
+                line = line.trim(); // Trim globally to handle leading/trailing spaces
                 if (!line) return;
 
-                // 1. Header
-                if (headerRegex.test(line)) {
+                // 1. Header (Hostname/Date)
+                // Looks for "Linux [ver] [hostname] [date]"
+                if (line.startsWith('Linux')) {
                     const parts = line.split(/\s+/);
                     if (parts.length >= 4) {
                         fileObj.hostname = parts[2].replace(/[()]/g, '');
@@ -193,41 +199,36 @@
 
                 // 2. Content
                 if (timeRegex.test(line)) {
-                    if (line.startsWith('Average:')) return; 
+                    if (line.includes('Average:')) return; 
 
                     const parts = line.split(/\s+/);
                     
-                    // --- Improved Heuristic: Header vs Data ---
+                    // --- Header vs Data Detection ---
                     let isHeader = false;
                     let numericCount = 0;
                     let textCount = 0;
                     
-                    // Check columns 2, 3, 4 (skipping Time and potential Instance ID)
                     let checkLimit = Math.min(parts.length, 5);
                     
                     for (let i = 2; i < checkLimit; i++) {
                         const val = parts[i];
-                        // Treat '-' as a number (it's just missing data)
-                        // Treat actual numbers as numbers
-                        if (!isNaN(parseFloat(val)) || val.trim() === '-') {
+                        // Treat '-' as a valid data point (null value)
+                        if (!isNaN(parseFloat(val)) || val === '-') {
                             numericCount++;
                         } else {
                             textCount++;
                         }
                     }
 
-                    // If we have more text than numbers in the data fields, it's a header
                     if (textCount > numericCount) {
                         isHeader = true;
                     }
 
                     if (isHeader) {
-                        const rawColumns = parts.slice(1); // Remove Time
+                        const rawColumns = parts.slice(1);
                         keyIndex = -1;
-                        let sectionIdentifier = rawColumns[0]; // Default to first col
+                        let sectionIdentifier = rawColumns[0];
 
-                        // Check if the first column is a known Instance Key (e.g. CPU, DEV)
-                        // Or if ANY column is a known key (sometimes key is 2nd)
                         for (let i = 0; i < rawColumns.length; i++) {
                             if (KNOWN_KEYS.includes(rawColumns[i])) {
                                 keyIndex = i;
@@ -236,7 +237,6 @@
                             }
                         }
 
-                        // Map Section Name
                         if (SECTION_MAP[sectionIdentifier]) currentSectionName = SECTION_MAP[sectionIdentifier];
                         else if (rawColumns.length > 0 && SECTION_MAP[rawColumns[0]]) currentSectionName = SECTION_MAP[rawColumns[0]];
                         else currentSectionName = sectionIdentifier;
@@ -254,9 +254,9 @@
                         }
                     } 
                     else if (currentSectionName && currentColumns) {
-                        // Data Row Parsing
-                        // Strict check on column count can be risky if spaces vary, but loose check is safer
-                        if (Math.abs(parts.length - (currentColumns.length + 1)) > 2) return;
+                        // Data Row
+                        // Loose validation on length to prevent skipping valid rows with different spacing
+                        if (Math.abs(parts.length - (currentColumns.length + 1)) > 3) return;
 
                         const time = parts[0];
                         const values = parts.slice(1);
@@ -273,15 +273,12 @@
 
                         const metricObj = { time: time };
                         
-                        // Map values to columns
                         values.forEach((val, idx) => {
-                            // Boundary check
                             if (idx >= sectionDef.columns.length) return;
-                            
                             const colName = sectionDef.columns[idx];
                             const floatVal = parseFloat(val);
                             
-                            // If it's a dash, store as null or 0? 0 is safer for charts
+                            // Handle empty data
                             if (val === '-') {
                                 metricObj[colName] = 0; 
                             } else {
@@ -300,6 +297,15 @@
                     delete fileObj.sections[key];
                 }
             });
+            
+            // Check if parsing failed
+            if (Object.keys(fileObj.sections).length === 0) {
+                throw new Error("No sections found. Please check file format.");
+            }
+
+            // Fallback if hostname is missing
+            if (!fileObj.hostname) fileObj.hostname = "Unknown Host";
+            if (!fileObj.date) fileObj.date = "Unknown Date";
 
             const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
             this.filesData[fileId] = fileObj;
@@ -328,7 +334,7 @@
 
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover');
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault(); dropZone.classList.remove('dragover');
         handleFiles(e.dataTransfer.files);
@@ -348,12 +354,16 @@
                 try {
                     const fileId = parser.parseFile(file.name, e.target.result);
                     addOption(fileSelect, fileId, fileId);
-                } catch (err) { console.error(err); showError("解析失敗: " + file.name); } 
-                finally {
+                } catch (err) { 
+                    console.error(err); 
+                    showError(`解析失敗 (${file.name}): ${err.message}`); 
+                } finally {
                     processedCount++;
                     if (processedCount === totalFiles) {
                         updateUIState();
-                        if (fileSelect.options.length > 0) btnPdf.style.display = 'block';
+                        if (fileSelect.options.length > 0 && !fileSelect.disabled) {
+                            btnPdf.style.display = 'block';
+                        }
                     }
                 }
             };
@@ -392,7 +402,6 @@
         });
         sectionSelect.disabled = false;
         
-        // Smart Default Section
         if (sectionSelect.options.length > 0) {
             const defaults = ['Disk I/O', 'CPU Usage', 'Memory'];
             for(let d of defaults) {
@@ -420,7 +429,6 @@
         if (firstInst && data.instances[firstInst].length > 0) {
             const sampleRow = data.instances[firstInst][0];
             data.columns.forEach(col => {
-                // Show option if column is numeric or was parsed as such
                 if (typeof sampleRow[col] === 'number') {
                     const opt = document.createElement('option'); opt.value = col; opt.text = col;
                     metricSelect.add(opt);
@@ -498,7 +506,7 @@
     }
 
     /**
-     * PDF Logic with Delay for Rendering
+     * PDF Logic (v6 - Fixed Visibility Issue)
      */
     btnPdf.addEventListener('click', async () => {
         const fileId = fileSelect.value;
@@ -506,7 +514,7 @@
 
         const originalText = btnPdf.textContent;
         btnPdf.disabled = true;
-        btnPdf.textContent = '生成中 (0%)...';
+        btnPdf.textContent = '生成中...';
 
         try {
             const dataObj = parser.getData()[fileId];
@@ -514,7 +522,6 @@
             const doc = new jsPDF('l', 'mm', 'a4');
             const pageWidth = doc.internal.pageSize.getWidth();
             
-            // Standard Reports
             const reportConfig = [
                 { title: 'CPU Usage', section: 'CPU Usage', instance: 'all', metrics: ['%usr', '%sys', '%iowait'] },
                 { title: 'Memory Usage', section: 'Memory', instance: 'all', metrics: ['kbmemfree', '%memused', 'kbcommit'] },
@@ -524,7 +531,6 @@
                 { title: 'Swap Usage', section: 'Swap', instance: 'all', metrics: ['%swpused'] }
             ];
 
-            // Cover Page
             doc.setFontSize(24);
             doc.text('SAR System Performance Report', pageWidth / 2, 80, { align: 'center' });
             doc.setFontSize(16);
@@ -534,19 +540,15 @@
             const pdfCanvas = document.getElementById('pdf-canvas');
             const chartCtx = pdfCanvas.getContext('2d');
 
-            let progress = 0;
             for (const config of reportConfig) {
-                progress++;
-                btnPdf.textContent = `生成中 (${Math.round((progress / reportConfig.length) * 100)}%)...`;
-
                 const sectionData = dataObj.sections[config.section];
                 if (!sectionData) continue;
 
                 let targetInstance = 'all';
-                if (config.instance === 'first') {
-                    targetInstance = Object.keys(sectionData.instances)[0];
-                } else if (!sectionData.instances['all']) {
-                     targetInstance = Object.keys(sectionData.instances)[0];
+                if (config.instance === 'first' || !sectionData.instances['all']) {
+                     const keys = Object.keys(sectionData.instances);
+                     if (keys.length > 0) targetInstance = keys[0];
+                     else continue;
                 }
 
                 if (!sectionData.instances[targetInstance]) continue;
@@ -554,7 +556,6 @@
                 const timeSeries = sectionData.instances[targetInstance];
                 const labels = timeSeries.map(d => d.time);
                 
-                // Build Datasets
                 const datasets = config.metrics.map((metric, idx) => {
                      if (typeof timeSeries[0][metric] === 'undefined') return null;
                      const colors = ['#0056b3', '#d63384', '#28a745', '#fd7e14'];
@@ -571,14 +572,17 @@
 
                 if (datasets.length === 0) continue;
 
-                // Render on hidden canvas
                 if (window.tempChart) window.tempChart.destroy();
+
+                // Explicitly set canvas size before render
+                pdfCanvas.width = 1600;
+                pdfCanvas.height = 900;
 
                 window.tempChart = new Chart(chartCtx, {
                     type: 'line',
                     data: { labels: labels, datasets: datasets },
                     options: {
-                        responsive: false, // Important for PDF
+                        responsive: false,
                         animation: false,
                         scales: { x: { ticks: { maxTicksLimit: 15 } }, y: { beginAtZero: true } },
                         plugins: {
@@ -588,8 +592,7 @@
                     }
                 });
 
-                // Small delay to ensure render logic completes
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, 150)); // Wait for render
 
                 doc.addPage();
                 doc.setFontSize(14);
@@ -603,7 +606,7 @@
 
         } catch (e) {
             console.error(e);
-            alert("PDF 生成失敗，請檢查瀏覽器 Console 紀錄");
+            alert("PDF 生成失敗: " + e.message);
         } finally {
             btnPdf.disabled = false;
             btnPdf.textContent = originalText;
