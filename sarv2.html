@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 分析與報表工具 (v6)</title>
+    <title>RHEL SAR 分析工具 (v7 Safe Mode)</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
     <style>
         :root {
             --primary-color: #0056b3;
@@ -37,52 +39,42 @@
             padding-bottom: 10px;
         }
 
-        h1 {
-            font-size: 1.5rem;
-            margin: 0;
-            color: var(--primary-color);
-        }
+        h1 { font-size: 1.5rem; margin: 0; color: var(--primary-color); }
 
         .btn-download {
             background-color: var(--btn-color);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            font-size: 0.95rem;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            display: none; /* Hidden until file loaded */
+            color: white; border: none; padding: 10px 20px;
+            border-radius: 4px; font-size: 0.95rem; cursor: pointer;
+            transition: background-color 0.2s; display: none;
         }
-
         .btn-download:hover { background-color: #218838; }
         .btn-download:disabled { background-color: #ccc; cursor: not-allowed; }
 
         .controls {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-            background: var(--card-bg);
-            padding: 15px;
-            border-radius: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px; margin-bottom: 20px;
+            background: var(--card-bg); padding: 15px;
+            border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .control-group { display: flex; flex-direction: column; }
         label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #666; }
-        select, input[type="file"] {
-            padding: 8px; border: 1px solid var(--border-color);
-            border-radius: 4px; font-size: 0.9rem; background-color: #fff;
-        }
+        select { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: #fff; }
 
+        /* Robust Drop Zone */
         #drop-zone {
             border: 2px dashed var(--border-color);
-            border-radius: 6px; padding: 20px; text-align: center;
+            border-radius: 6px; padding: 30px; text-align: center;
             background-color: #fafafa; transition: background-color 0.2s;
-            cursor: pointer; margin-bottom: 20px;
+            cursor: pointer; margin-bottom: 20px; position: relative;
         }
-        #drop-zone.dragover { background-color: #e9ecef; border-color: var(--primary-color); }
+        #drop-zone:hover, #drop-zone.dragover { background-color: #e9ecef; border-color: var(--primary-color); }
+        
+        /* Fix for input triggering */
+        #file-input {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0; cursor: pointer; display: block;
+        }
 
         .chart-container {
             flex: 1; position: relative; background: var(--card-bg);
@@ -90,32 +82,29 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-height: 400px;
         }
 
-        .error-msg { color: #dc3545; font-size: 0.9rem; margin-top: 5px; display: none; }
+        .error-msg { color: #dc3545; font-size: 0.9rem; margin-top: 5px; display: none; padding: 10px; background: #ffe6e6; border: 1px solid #dc3545; border-radius: 4px; }
         .file-list { margin-top: 5px; font-size: 0.85rem; color: #555; }
         #no-data-msg {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: #999; font-size: 1.2rem; display: none;
         }
         
-        /* Critical Fix: Move canvas off-screen instead of hiding it */
-        #pdf-canvas {
-            position: fixed;
-            left: -9999px;
-            top: 0;
-            visibility: hidden;
-        }
+        /* Off-screen canvas for PDF */
+        #pdf-canvas { position: fixed; left: -9999px; top: 0; }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>RHEL SAR 分析與報表工具 (v6)</h1>
+    <h1>RHEL SAR 分析工具 (v7)</h1>
     <button id="btn-pdf" class="btn-download">📥 下載 PDF 報表</button>
 </header>
 
+<div id="system-status" style="display:none; padding:10px; margin-bottom:10px; border-radius:4px;"></div>
+
 <div id="drop-zone">
-    <p>點擊選擇或將 SAR 檔案拖曳至此處 (支援多檔)</p>
-    <input type="file" id="file-input" multiple style="display: none;">
+    <p>點擊此處或拖曳 SAR 檔案上傳</p>
+    <input type="file" id="file-input" multiple>
     <div id="file-list-display" class="file-list"></div>
 </div>
 
@@ -149,7 +138,35 @@
 
 <script>
     /**
-     * SAR Parser Logic (v6 - Robust & Permissive)
+     * 1. Global Error Trap & Init Check
+     */
+    window.onerror = function(message, source, lineno, colno, error) {
+        const statusDiv = document.getElementById('system-status');
+        statusDiv.style.display = 'block';
+        statusDiv.style.backgroundColor = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.textContent = `系統錯誤: ${message} (Line: ${lineno})`;
+        console.error("Global Error:", error);
+        return false;
+    };
+
+    // Check libraries
+    document.addEventListener('DOMContentLoaded', () => {
+        const statusDiv = document.getElementById('system-status');
+        const missing = [];
+        if (typeof Chart === 'undefined') missing.push("Chart.js (圖表功能將失效)");
+        if (typeof window.jspdf === 'undefined') missing.push("jsPDF (PDF功能將失效)");
+        
+        if (missing.length > 0) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.backgroundColor = '#fff3cd';
+            statusDiv.style.color = '#856404';
+            statusDiv.textContent = `警告: 無法載入外部函式庫 (${missing.join(', ')})。請確認網路連接。您仍可解析檔案，但圖表與報表可能無法產生。`;
+        }
+    });
+
+    /**
+     * 2. Core Logic
      */
     'use strict';
 
@@ -157,17 +174,14 @@
         constructor() { this.filesData = {}; }
 
         parseFile(fileName, content) {
-            // Fix: Strip BOM if present
-            if (content.charCodeAt(0) === 0xFEFF) {
-                content = content.slice(1);
-            }
+            // Remove BOM
+            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
 
             const lines = content.split(/\r?\n/);
             const fileObj = { date: '', hostname: '', sections: {} };
             
-            // Fix: Regex now allows leading whitespace (\s*)
+            // Regex patterns
             const timeRegex = /^\s*\d{2}:\d{2}:\d{2}\s+/;
-            const headerRegex = /Linux\s+/; // Looser check for header
             
             let currentSectionName = null;
             let currentColumns = null;
@@ -178,16 +192,14 @@
             const SECTION_MAP = {
                 'CPU': 'CPU Usage', 'IFACE': 'Network', 'DEV': 'Disk I/O',
                 'kbmemfree': 'Memory', 'runq-sz': 'Load / Queue', 'plist-sz': 'Process List',
-                'tps': 'I/O & Transfer', 'pgpgin': 'Paging', 'TTY': 'TTY',
-                'cswch/s': 'Context Switches'
+                'tps': 'I/O & Transfer', 'pgpgin': 'Paging', 'TTY': 'TTY', 'cswch/s': 'Context Switches'
             };
 
             lines.forEach(line => {
-                line = line.trim(); // Trim globally to handle leading/trailing spaces
+                line = line.trim();
                 if (!line) return;
 
-                // 1. Header (Hostname/Date)
-                // Looks for "Linux [ver] [hostname] [date]"
+                // Header Check (Loose)
                 if (line.startsWith('Linux')) {
                     const parts = line.split(/\s+/);
                     if (parts.length >= 4) {
@@ -197,32 +209,25 @@
                     return;
                 }
 
-                // 2. Content
+                // Data Check
                 if (timeRegex.test(line)) {
-                    if (line.includes('Average:')) return; 
+                    if (line.includes('Average:')) return;
 
                     const parts = line.split(/\s+/);
                     
-                    // --- Header vs Data Detection ---
+                    // Heuristic: Header vs Data
                     let isHeader = false;
                     let numericCount = 0;
                     let textCount = 0;
-                    
                     let checkLimit = Math.min(parts.length, 5);
                     
                     for (let i = 2; i < checkLimit; i++) {
                         const val = parts[i];
-                        // Treat '-' as a valid data point (null value)
-                        if (!isNaN(parseFloat(val)) || val === '-') {
-                            numericCount++;
-                        } else {
-                            textCount++;
-                        }
+                        if (!isNaN(parseFloat(val)) || val === '-') numericCount++;
+                        else textCount++;
                     }
 
-                    if (textCount > numericCount) {
-                        isHeader = true;
-                    }
+                    if (textCount > numericCount) isHeader = true;
 
                     if (isHeader) {
                         const rawColumns = parts.slice(1);
@@ -252,10 +257,8 @@
                                 instances: {}
                             };
                         }
-                    } 
-                    else if (currentSectionName && currentColumns) {
-                        // Data Row
-                        // Loose validation on length to prevent skipping valid rows with different spacing
+                    } else if (currentSectionName && currentColumns) {
+                         // Loose length check (allow +/- 3 cols diff)
                         if (Math.abs(parts.length - (currentColumns.length + 1)) > 3) return;
 
                         const time = parts[0];
@@ -267,23 +270,14 @@
                             instanceName = values[sectionDef.keyIndex];
                         }
 
-                        if (!sectionDef.instances[instanceName]) {
-                            sectionDef.instances[instanceName] = [];
-                        }
+                        if (!sectionDef.instances[instanceName]) sectionDef.instances[instanceName] = [];
 
                         const metricObj = { time: time };
-                        
                         values.forEach((val, idx) => {
                             if (idx >= sectionDef.columns.length) return;
                             const colName = sectionDef.columns[idx];
                             const floatVal = parseFloat(val);
-                            
-                            // Handle empty data
-                            if (val === '-') {
-                                metricObj[colName] = 0; 
-                            } else {
-                                metricObj[colName] = isNaN(floatVal) ? val : floatVal;
-                            }
+                            metricObj[colName] = (val === '-' || isNaN(floatVal)) ? 0 : floatVal;
                         });
 
                         sectionDef.instances[instanceName].push(metricObj);
@@ -291,19 +285,14 @@
                 }
             });
 
-            // Cleanup empty sections
+            // Clean
             Object.keys(fileObj.sections).forEach(key => {
-                if (Object.keys(fileObj.sections[key].instances).length === 0) {
-                    delete fileObj.sections[key];
-                }
+                if (Object.keys(fileObj.sections[key].instances).length === 0) delete fileObj.sections[key];
             });
-            
-            // Check if parsing failed
-            if (Object.keys(fileObj.sections).length === 0) {
-                throw new Error("No sections found. Please check file format.");
-            }
 
-            // Fallback if hostname is missing
+            if (Object.keys(fileObj.sections).length === 0) throw new Error("No valid data sections found.");
+            
+            // Fallback
             if (!fileObj.hostname) fileObj.hostname = "Unknown Host";
             if (!fileObj.date) fileObj.date = "Unknown Date";
 
@@ -315,9 +304,7 @@
         getData() { return this.filesData; }
     }
 
-    /**
-     * UI Logic
-     */
+    // Init
     const parser = new SarParser();
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
@@ -332,17 +319,25 @@
     const metricSelect = document.getElementById('metric-select');
     let myChart = null;
 
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover');
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault(); dropZone.classList.remove('dragover');
-        handleFiles(e.dataTransfer.files);
-    });
+    // Use Change event on input directly (covered by CSS opacity)
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    
+    // Drag and Drop Visuals only (Input handles the click)
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#0056b3'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#dee2e6'; });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#dee2e6';
+        if(e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            fileInput.files = e.dataTransfer.files; // Assign to input
+            handleFiles(e.dataTransfer.files);
+        }
+    });
 
     function handleFiles(files) {
         errorDisplay.style.display = 'none';
+        if (!files || files.length === 0) return;
+
         const totalFiles = files.length;
         let processedCount = 0;
         const fileNames = [];
@@ -354,19 +349,18 @@
                 try {
                     const fileId = parser.parseFile(file.name, e.target.result);
                     addOption(fileSelect, fileId, fileId);
-                } catch (err) { 
-                    console.error(err); 
-                    showError(`解析失敗 (${file.name}): ${err.message}`); 
+                } catch (err) {
+                    console.error(err);
+                    showError(`解析失敗 (${file.name}): ${err.message}`);
                 } finally {
                     processedCount++;
                     if (processedCount === totalFiles) {
                         updateUIState();
-                        if (fileSelect.options.length > 0 && !fileSelect.disabled) {
-                            btnPdf.style.display = 'block';
-                        }
+                        if (fileSelect.options.length > 0 && !fileSelect.disabled) btnPdf.style.display = 'block';
                     }
                 }
             };
+            reader.onerror = () => showError(`讀取錯誤: ${file.name}`);
             reader.readAsText(file);
         });
         fileListDisplay.textContent = `已載入: ${fileNames.join(', ')}`;
@@ -391,14 +385,15 @@
         if (fileSelect.options.length > 0) fileSelect.dispatchEvent(new Event('change'));
     }
 
+    // UI Event Listeners
     fileSelect.addEventListener('change', () => {
         const val = fileSelect.value;
         const data = parser.getData()[val];
         sectionSelect.innerHTML = '';
         if (!data) return;
+        
         Object.keys(data.sections).sort().forEach(sec => {
-            const opt = document.createElement('option'); opt.value = sec; opt.text = sec;
-            sectionSelect.add(opt);
+            const opt = document.createElement('option'); opt.value = sec; opt.text = sec; sectionSelect.add(opt);
         });
         sectionSelect.disabled = false;
         
@@ -420,8 +415,7 @@
 
         const instances = Object.keys(data.instances);
         instances.forEach(inst => {
-            const opt = document.createElement('option'); opt.value = inst; opt.text = inst;
-            itemSelect.add(opt);
+            const opt = document.createElement('option'); opt.value = inst; opt.text = inst; itemSelect.add(opt);
         });
         itemSelect.disabled = false;
 
@@ -430,14 +424,13 @@
             const sampleRow = data.instances[firstInst][0];
             data.columns.forEach(col => {
                 if (typeof sampleRow[col] === 'number') {
-                    const opt = document.createElement('option'); opt.value = col; opt.text = col;
-                    metricSelect.add(opt);
+                    const opt = document.createElement('option'); opt.value = col; opt.text = col; metricSelect.add(opt);
                 }
             });
         }
         metricSelect.disabled = false;
-        
         if (instances.includes('all')) itemSelect.value = 'all';
+        
         const preferred = ['%util', 'tps', '%usr', 'kbmemfree', 'runq-sz', 'rxkB/s'];
         for (const p of preferred) {
             let found = false;
@@ -453,6 +446,8 @@
     metricSelect.addEventListener('change', renderChart);
 
     function renderChart() {
+        if (typeof Chart === 'undefined') return; // Safe guard
+
         const fileId = fileSelect.value;
         const sectionName = sectionSelect.value;
         const instanceName = itemSelect.value;
@@ -487,7 +482,7 @@
                     borderColor: '#0056b3',
                     backgroundColor: 'rgba(0, 86, 179, 0.1)',
                     borderWidth: 2,
-                    pointRadius: 0, 
+                    pointRadius: 0,
                     pointHitRadius: 10,
                     fill: true,
                     tension: 0.2
@@ -505,10 +500,13 @@
         });
     }
 
-    /**
-     * PDF Logic (v6 - Fixed Visibility Issue)
-     */
+    // PDF Logic
     btnPdf.addEventListener('click', async () => {
+        if (typeof window.jspdf === 'undefined') {
+            alert("錯誤: jsPDF 函式庫未載入 (可能因為無網路)，無法產生報表。");
+            return;
+        }
+
         const fileId = fileSelect.value;
         if (!fileId || fileId.includes('請先上傳')) return;
 
@@ -539,6 +537,10 @@
 
             const pdfCanvas = document.getElementById('pdf-canvas');
             const chartCtx = pdfCanvas.getContext('2d');
+            
+            // Explicitly set size
+            pdfCanvas.width = 1600;
+            pdfCanvas.height = 900;
 
             for (const config of reportConfig) {
                 const sectionData = dataObj.sections[config.section];
@@ -547,8 +549,7 @@
                 let targetInstance = 'all';
                 if (config.instance === 'first' || !sectionData.instances['all']) {
                      const keys = Object.keys(sectionData.instances);
-                     if (keys.length > 0) targetInstance = keys[0];
-                     else continue;
+                     if (keys.length > 0) targetInstance = keys[0]; else continue;
                 }
 
                 if (!sectionData.instances[targetInstance]) continue;
@@ -574,16 +575,11 @@
 
                 if (window.tempChart) window.tempChart.destroy();
 
-                // Explicitly set canvas size before render
-                pdfCanvas.width = 1600;
-                pdfCanvas.height = 900;
-
                 window.tempChart = new Chart(chartCtx, {
                     type: 'line',
                     data: { labels: labels, datasets: datasets },
                     options: {
-                        responsive: false,
-                        animation: false,
+                        responsive: false, animation: false,
                         scales: { x: { ticks: { maxTicksLimit: 15 } }, y: { beginAtZero: true } },
                         plugins: {
                             legend: { position: 'top' },
@@ -592,18 +588,15 @@
                     }
                 });
 
-                await new Promise(r => setTimeout(r, 150)); // Wait for render
+                await new Promise(r => setTimeout(r, 200)); 
 
                 doc.addPage();
                 doc.setFontSize(14);
                 doc.text(`${config.title} - ${dataObj.hostname}`, 10, 15);
-                
                 const imgData = pdfCanvas.toDataURL('image/png', 1.0);
                 doc.addImage(imgData, 'PNG', 10, 30, pageWidth - 20, 140);
             }
-
             doc.save(`SAR_Report_${dataObj.hostname}_${dataObj.date}.pdf`);
-
         } catch (e) {
             console.error(e);
             alert("PDF 生成失敗: " + e.message);
