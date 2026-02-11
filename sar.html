@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 檔案分析工具 (v2)</title>
+    <title>RHEL SAR 檔案分析工具 (v3 - Disk Fix)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -107,12 +107,22 @@
             font-size: 0.85rem;
             color: #555;
         }
+        
+        #no-data-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #999;
+            font-size: 1.2rem;
+            display: none;
+        }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>RHEL SAR 檔案分析工具 (v2)</h1>
+    <h1>RHEL SAR 檔案分析工具 (v3)</h1>
 </header>
 
 <div id="drop-zone">
@@ -143,12 +153,13 @@
 <div id="error-display" class="error-msg"></div>
 
 <div class="chart-container">
+    <div id="no-data-msg">無此區塊資料</div>
     <canvas id="sarChart"></canvas>
 </div>
 
 <script>
     /**
-     * SAR Parser Logic (Enhanced)
+     * SAR Parser Logic (Version 3 - Robust Header/Data Detection)
      */
     'use strict';
 
@@ -169,15 +180,13 @@
             const timeRegex = /^\d{2}:\d{2}:\d{2}\s+/;
             const headerRegex = /^Linux\s+/;
             
-            // State variables
+            // State
             let currentSectionName = null;
             let currentColumns = null;
-            let keyColumnIndex = -1; // -1 means global section (no instance ID like eth0, sda)
+            let sectionHasInstance = false;
+            let keyIndex = -1;
 
-            // Pre-defined known columns that act as keys (Instance IDs)
-            const KNOWN_KEYS = ['CPU', 'IFACE', 'DEV', 'INTR', 'BUS', 'FAN', 'TEMP', 'IN'];
-            
-            // Section Name Mapping for better readability
+            const KNOWN_KEYS = ['CPU', 'IFACE', 'DEV', 'INTR', 'BUS', 'FAN', 'TEMP', 'IN', 'TTY'];
             const SECTION_MAP = {
                 'CPU': 'CPU Usage',
                 'IFACE': 'Network',
@@ -187,7 +196,9 @@
                 'plist-sz': 'Process List',
                 'tps': 'I/O & Transfer',
                 'pgpgin': 'Paging',
-                'dentunusd': 'Kernel Tables'
+                'dentunusd': 'Kernel Tables',
+                'TTY': 'TTY',
+                'cswch/s': 'Context Switches'
             };
 
             lines.forEach(line => {
@@ -204,76 +215,94 @@
                     return;
                 }
 
-                // 2. Detect Section Headers
+                // 2. Process Time-stamped Lines
                 if (timeRegex.test(line)) {
-                    const parts = line.split(/\s+/);
-                    const col2 = parts[1];
+                    if (line.startsWith('Average:')) return; 
 
-                    // Heuristic: Header lines usually have text in col2 that are NOT numbers (and not 'all')
-                    // Special case: 'tps' is a header, but lines below it start with numbers.
-                    // If col2 is not a number, it's likely a header.
-                    if (isNaN(parseFloat(col2)) && col2 !== 'all') {
+                    const parts = line.split(/\s+/);
+                    // parts[0] is Time. parts[1] is Key or Data.
+                    
+                    // --- Heuristic: Header vs Data ---
+                    // A header row typically has text in columns that are usually numeric.
+                    // We check columns starting from index 2 (to avoid the ambiguous column 1 which can be 'all', 'dev8-0' or 'tps')
+                    // If columns 2, 3, 4... are strictly numbers -> It's Data.
+                    // If columns 2, 3, 4... contain text -> It's a Header.
+                    
+                    let isHeader = false;
+                    let isData = false;
+
+                    // Check a few columns after the ID column to determine type
+                    // We check up to 3 columns to be sure
+                    let numericCount = 0;
+                    let textCount = 0;
+                    let checkLimit = Math.min(parts.length, 5); 
+                    
+                    for (let i = 2; i < checkLimit; i++) {
+                        if (isNaN(parseFloat(parts[i]))) {
+                            textCount++;
+                        } else {
+                            numericCount++;
+                        }
+                    }
+
+                    if (textCount > numericCount) {
+                        isHeader = true;
+                    } else {
+                        isData = true;
+                    }
+
+                    // Edge Case: If only 2 columns (Time + Value), e.g. "00:00:01 value"
+                    // If parts[1] is number -> Data. If text -> Header (unless it's a known metric like runq-sz?)
+                    // Usually sar has more columns.
+
+                    if (isHeader) {
+                        // --- Parsing Header ---
+                        const rawColumns = parts.slice(1);
                         
-                        // It is a header row
-                        const rawColumns = parts.slice(1); // Exclude Time column
-                        
-                        // Determine if this section has an Instance Key (e.g. DEV, CPU)
-                        // Search for known key columns
-                        keyColumnIndex = -1;
-                        let sectionKey = null;
+                        // Detect Section Key
+                        keyIndex = -1;
+                        let sectionIdentifier = rawColumns[0]; // default to first col
 
                         for (let i = 0; i < rawColumns.length; i++) {
                             if (KNOWN_KEYS.includes(rawColumns[i])) {
-                                keyColumnIndex = i;
-                                sectionKey = rawColumns[i];
+                                keyIndex = i;
+                                sectionIdentifier = rawColumns[i];
                                 break;
                             }
                         }
 
-                        // Identify Section Name
-                        if (sectionKey && SECTION_MAP[sectionKey]) {
-                            currentSectionName = SECTION_MAP[sectionKey];
+                        // Map name
+                        if (SECTION_MAP[sectionIdentifier]) {
+                            currentSectionName = SECTION_MAP[sectionIdentifier];
+                        } else if (rawColumns.length > 0 && SECTION_MAP[rawColumns[0]]) {
+                            currentSectionName = SECTION_MAP[rawColumns[0]];
                         } else {
-                            // Try to map by the first column name if no key found (e.g., tps, kbmemfree)
-                            if (SECTION_MAP[rawColumns[0]]) {
-                                currentSectionName = SECTION_MAP[rawColumns[0]];
-                            } else {
-                                currentSectionName = rawColumns[0]; // Fallback
-                            }
+                            currentSectionName = sectionIdentifier; // Fallback
                         }
-                        
-                        currentColumns = rawColumns;
 
-                        // Initialize section storage
+                        currentColumns = rawColumns;
+                        sectionHasInstance = (keyIndex !== -1);
+
                         if (!fileObj.sections[currentSectionName]) {
                             fileObj.sections[currentSectionName] = {
                                 columns: currentColumns,
-                                hasInstance: (keyColumnIndex !== -1),
-                                keyIndex: keyColumnIndex,
+                                hasInstance: sectionHasInstance,
+                                keyIndex: keyIndex,
                                 instances: {}
                             };
                         }
-                        return;
-                    }
+                    } 
+                    else if (isData && currentSectionName && currentColumns) {
+                        // --- Parsing Data ---
+                        // Validate column count matches header (loose check)
+                        if (Math.abs(parts.length - (currentColumns.length + 1)) > 1) return;
 
-                    // 3. Process Data Row
-                    if (currentSectionName && currentColumns) {
-                        if (line.startsWith('Average:')) return; // Ignore averages
-
-                        const rowParts = line.split(/\s+/);
-                        const time = rowParts[0];
-                        const values = rowParts.slice(1);
-
-                        // Basic validation: count matches columns
-                        // But wait, if it's a global section (keyIndex == -1), values.length == columns.length
-                        // If instance section, values.length == columns.length
-                        if (values.length !== currentColumns.length) return;
-
+                        const time = parts[0];
+                        const values = parts.slice(1);
                         const sectionDef = fileObj.sections[currentSectionName];
+                        
                         let instanceName = 'all';
-
-                        // Extract Instance Name or use default
-                        if (sectionDef.hasInstance) {
+                        if (sectionDef.hasInstance && sectionDef.keyIndex < values.length) {
                             instanceName = values[sectionDef.keyIndex];
                         }
 
@@ -282,22 +311,24 @@
                         }
 
                         const metricObj = { time: time };
-                        
                         values.forEach((val, idx) => {
-                            // If this column is the key (e.g. 'DEV'), keep it but usually we plot numbers
-                            // Try convert to float
-                            const floatVal = parseFloat(val);
-                            
-                            // Map to column name
-                            const colName = currentColumns[idx];
-                            
-                            // Store only if it's not the key column itself (optional, but cleaner)
-                            // or just store everything. Let's store everything, chart logic will filter non-numbers.
-                            metricObj[colName] = isNaN(floatVal) ? val : floatVal;
+                            // Don't overwrite time if column name is time (unlikely)
+                            const colName = sectionDef.columns[idx];
+                            if (!colName) return;
+
+                            const numVal = parseFloat(val);
+                            metricObj[colName] = isNaN(numVal) ? val : numVal;
                         });
 
                         sectionDef.instances[instanceName].push(metricObj);
                     }
+                }
+            });
+
+            // Post-process: Cleanup empty sections (if any)
+            Object.keys(fileObj.sections).forEach(key => {
+                if (Object.keys(fileObj.sections[key].instances).length === 0) {
+                    delete fileObj.sections[key];
                 }
             });
 
@@ -319,6 +350,7 @@
     const fileInput = document.getElementById('file-input');
     const fileListDisplay = document.getElementById('file-list-display');
     const errorDisplay = document.getElementById('error-display');
+    const noDataMsg = document.getElementById('no-data-msg');
     
     const fileSelect = document.getElementById('file-select');
     const sectionSelect = document.getElementById('section-select');
@@ -385,7 +417,6 @@
         sectionSelect.innerHTML = '';
         if (!data) return;
         
-        // Sort sections nicely
         Object.keys(data.sections).sort().forEach(sec => {
             const opt = document.createElement('option');
             opt.value = sec;
@@ -394,8 +425,16 @@
         });
         sectionSelect.disabled = false;
         if (sectionSelect.options.length > 0) {
-            // Prefer common sections if available
-            if (data.sections['CPU Usage']) sectionSelect.value = 'CPU Usage';
+            // Priority defaults
+            const defaults = ['Disk I/O', 'CPU Usage', 'Memory'];
+            let setVal = false;
+            for(let d of defaults) {
+                if(data.sections[d]) {
+                    sectionSelect.value = d;
+                    setVal = true;
+                    break;
+                }
+            }
             sectionSelect.dispatchEvent(new Event('change'));
         }
     });
@@ -410,7 +449,6 @@
         
         if (!data) return;
 
-        // Populate Instances
         const instances = Object.keys(data.instances);
         instances.forEach(inst => {
             const opt = document.createElement('option');
@@ -420,8 +458,7 @@
         });
         itemSelect.disabled = false;
         
-        // Populate Metrics (Numeric only)
-        // Check first row of first instance
+        // Find numeric columns
         const firstInst = instances[0];
         if (firstInst && data.instances[firstInst].length > 0) {
             const sampleRow = data.instances[firstInst][0];
@@ -436,11 +473,11 @@
         }
         metricSelect.disabled = false;
         
-        // Defaults
+        // Default instance
         if (instances.includes('all')) itemSelect.value = 'all';
         
-        // Smart metric default
-        const preferred = ['%usr', '%util', 'kbmemfree', 'runq-sz', 'rxkB/s', 'tps'];
+        // Default metric priority
+        const preferred = ['%util', 'tps', 'rkB/s', 'wkB/s', '%usr', 'kbmemfree', 'runq-sz'];
         for (const p of preferred) {
             let found = false;
             for(let i=0; i<metricSelect.options.length; i++) {
@@ -465,9 +502,29 @@
         const instanceName = itemSelect.value;
         const metricName = metricSelect.value;
 
-        if (!fileId || !sectionName || !instanceName || !metricName) return;
+        // Clear existing chart if parameters are missing
+        if (!fileId || !sectionName || !instanceName || !metricName) {
+            if(myChart) {
+                myChart.destroy();
+                myChart = null;
+            }
+            noDataMsg.style.display = 'block';
+            return;
+        }
 
         const dataObj = parser.getData()[fileId];
+        // Safe check
+        if(!dataObj || !dataObj.sections[sectionName] || !dataObj.sections[sectionName].instances[instanceName]) {
+             if(myChart) {
+                myChart.destroy();
+                myChart = null;
+            }
+            noDataMsg.style.display = 'block';
+            noDataMsg.textContent = "此區塊無數據";
+            return;
+        }
+
+        noDataMsg.style.display = 'none';
         const timeSeries = dataObj.sections[sectionName].instances[instanceName];
 
         const labels = timeSeries.map(d => d.time);
