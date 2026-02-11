@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 分析工具 (v8 Smart Report)</title>
+    <title>RHEL SAR 分析工具 (v9 Deep Report)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -94,7 +94,7 @@
 <body>
 
 <header>
-    <h1>RHEL SAR 分析工具 (v8 Smart)</h1>
+    <h1>RHEL SAR 分析工具 (v9 Deep Report)</h1>
     <button id="btn-pdf" class="btn-download">📥 下載 PDF 報表</button>
 </header>
 
@@ -148,7 +148,7 @@
         // Memory (Convert KB to GB)
         'kbmemfree': { label: 'GB', div: 1048576 }, 
         'kbcommit': { label: 'GB', div: 1048576 },
-        'memused': { label: 'GB', div: 1048576 }, // Sometimes just memused without %
+        'memused': { label: 'GB', div: 1048576 },
         
         // Network / Disk (Convert KB/s to MB/s)
         'rxkB/s': { label: 'MB/s', div: 1024 },
@@ -162,13 +162,14 @@
         '%iowait': { label: '%', div: 1 },
         '%util': { label: '%', div: 1 },
         '%memused': { label: '%', div: 1 },
+        '%commit': { label: '%', div: 1 },
         '%swpused': { label: '%', div: 1 }
     };
 
     function getUnit(metricName) {
         if (UNIT_CONFIG[metricName]) return UNIT_CONFIG[metricName];
         if (metricName.startsWith('%')) return { label: '%', div: 1 };
-        if (metricName.startsWith('kb')) return { label: 'MB', div: 1024 }; // Default kb to MB if unknown
+        if (metricName.startsWith('kb')) return { label: 'MB', div: 1024 }; 
         return { label: '', div: 1 };
     }
 
@@ -262,7 +263,6 @@
                 if (Object.keys(fileObj.sections[key].instances).length === 0) delete fileObj.sections[key];
             });
             if (Object.keys(fileObj.sections).length === 0) throw new Error("無效的檔案格式");
-            
             if (!fileObj.hostname) fileObj.hostname = "Unknown";
             const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
             this.filesData[fileId] = fileObj;
@@ -278,12 +278,10 @@
     const itemSelect = document.getElementById('item-select');
     const metricSelect = document.getElementById('metric-select');
     const fileInput = document.getElementById('file-input');
-    const dropZone = document.getElementById('drop-zone');
     let myChart = null;
 
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     
-    // UI Helpers
     function handleFiles(files) {
         document.getElementById('error-display').style.display = 'none';
         if (!files.length) return;
@@ -309,26 +307,17 @@
     
     function updateUI() { if(fileSelect.options.length>0) fileSelect.dispatchEvent(new Event('change')); }
 
-    // Smart Selection Logic
     function findBestInstance(sectionData, metricHint) {
         const instances = Object.keys(sectionData.instances);
         if (instances.length === 1) return instances[0];
-        
-        // Filter out lo, face (header error), etc.
         const candidates = instances.filter(i => i !== 'lo' && i !== 'face' && i !== 'all');
-        
         if (candidates.length === 0) return instances[0];
-        if (candidates.length === 1) return candidates[0];
-
-        // Find max traffic
         let best = candidates[0];
         let maxTotal = 0;
-        
         candidates.forEach(inst => {
             const total = sectionData.instances[inst].reduce((acc, curr) => acc + (curr[metricHint] || 0), 0);
             if (total > maxTotal) { maxTotal = total; best = inst; }
         });
-        
         return best;
     }
 
@@ -338,7 +327,6 @@
         if(!data) return;
         Object.keys(data.sections).sort().forEach(s => sectionSelect.add(new Option(s, s)));
         sectionSelect.disabled = false;
-        // Priority
         const priority = ['Disk I/O', 'Network', 'CPU Usage'];
         for(let p of priority) if(data.sections[p]) { sectionSelect.value=p; break; }
         sectionSelect.dispatchEvent(new Event('change'));
@@ -348,23 +336,16 @@
         const data = parser.getData()[fileSelect.value]?.sections[sectionSelect.value];
         itemSelect.innerHTML = ''; metricSelect.innerHTML = '';
         if(!data) return;
-
-        // Auto Select Best Instance
-        const bestInst = findBestInstance(data, 'rxkB/s'); // Hint for network, ignored otherwise
-        
+        const bestInst = findBestInstance(data, 'rxkB/s'); 
         Object.keys(data.instances).forEach(i => itemSelect.add(new Option(i, i)));
-        itemSelect.value = bestInst; // Set best
+        itemSelect.value = bestInst; 
         itemSelect.disabled = false;
-
-        // Metrics
         const sample = data.instances[bestInst][0];
         data.columns.forEach(c => {
              if(typeof sample[c] === 'number') metricSelect.add(new Option(c, c));
         });
         metricSelect.disabled = false;
-        
-        // Default Metric
-        const preferred = ['rxkB/s', '%util', '%usr', 'kbmemfree'];
+        const preferred = ['rxkB/s', '%util', '%usr', 'kbmemfree', '%memused'];
         for(let p of preferred) {
             if(Array.from(metricSelect.options).some(o => o.value===p)) { metricSelect.value=p; break; }
         }
@@ -433,12 +414,20 @@
         const fileId = fileSelect.value;
         const dataObj = parser.getData()[fileId];
 
-        // Report Config
+        // Report Config (Expanded)
         const reportConfig = [
             { title: 'CPU Usage', section: 'CPU Usage', type: 'cpu', metrics: ['%usr', '%sys', '%iowait'] },
-            { title: 'Memory Usage', section: 'Memory', type: 'mem', metrics: ['kbmemfree', 'memused'] }, // removed %memused to keep scale uniform
+            
+            // Memory Split: Capacity (GB) vs Rate (%)
+            { title: 'Memory Capacity', section: 'Memory', type: 'mem', metrics: ['kbmemfree', 'memused'] },
+            { title: 'Memory Utilization', section: 'Memory', type: 'mem', metrics: ['%memused', '%commit'] },
+            
+            // Network
             { title: 'Network Traffic', section: 'Network', type: 'net', metrics: ['rxkB/s', 'txkB/s'] },
-            { title: 'Disk I/O', section: 'Disk I/O', type: 'disk', metrics: ['%util', 'await'] }
+            
+            // Disk Split: Load (%) vs Throughput (MB/s)
+            { title: 'Disk I/O Load', section: 'Disk I/O', type: 'disk', metrics: ['%util'] },
+            { title: 'Disk I/O Throughput', section: 'Disk I/O', type: 'disk', metrics: ['rkB/s', 'wkB/s'] }
         ];
 
         doc.setFontSize(22);
@@ -454,10 +443,9 @@
             const section = dataObj.sections[config.section];
             if(!section) continue;
 
-            // Smart Instance Selection for PDF
             let instance = 'all';
             if(config.type === 'net') instance = findBestInstance(section, 'rxkB/s');
-            else if(config.type === 'disk') instance = findBestInstance(section, '%util');
+            else if(config.type === 'disk') instance = findBestInstance(section, '%util'); // or rkB/s, usually same disk active
             else if(!section.instances['all']) instance = Object.keys(section.instances)[0];
 
             if(!section.instances[instance]) continue;
@@ -465,25 +453,23 @@
             const ts = section.instances[instance];
             const labels = ts.map(d => d.time);
             
-            // Determine Unit from first metric
-            const baseUnit = getUnit(config.metrics[0]);
+            // Verify all metrics exist (some sar versions miss %memused)
+            const validMetrics = config.metrics.filter(m => ts[0][m] !== undefined);
+            if (validMetrics.length === 0) continue;
+
+            const baseUnit = getUnit(validMetrics[0]);
             
-            const datasets = config.metrics.map((m, i) => {
-                if(ts[0][m] === undefined) return null;
+            const datasets = validMetrics.map((m, i) => {
                 const u = getUnit(m);
-                // Note: Mixing units in one chart (e.g. % and GB) is bad practice. 
-                // We assume config groups similar units.
                 return {
                     label: `${m} (${u.label})`,
                     data: ts.map(d => d[m] / u.div),
-                    borderColor: ['#007bff','#dc3545','#28a745'][i%3],
+                    borderColor: ['#007bff','#dc3545','#28a745', '#fd7e14'][i%4],
                     borderWidth: 3,
                     pointRadius: 0,
                     tension: 0.1
                 };
-            }).filter(d => d);
-
-            if(datasets.length === 0) continue;
+            });
 
             if(window.tmpChart) window.tmpChart.destroy();
             window.tmpChart = new Chart(chartCtx, {
@@ -508,7 +494,7 @@
             doc.addImage(pdfCanvas.toDataURL('image/png', 1.0), 'PNG', 10, 10, 280, 150);
         }
 
-        doc.save(`SAR_Report_${dataObj.hostname}.pdf`);
+        doc.save(`SAR_Report_${dataObj.hostname}_v9.pdf`);
         btnPdf.disabled = false; btnPdf.textContent = '📥 下載 PDF 報表';
     });
 </script>
