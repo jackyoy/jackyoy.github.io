@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SAR 分析工具 (v7 Safe Mode)</title>
+    <title>RHEL SAR 分析工具 (v8 Smart Report)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -61,16 +61,14 @@
         label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #666; }
         select { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: #fff; }
 
-        /* Robust Drop Zone */
         #drop-zone {
             border: 2px dashed var(--border-color);
             border-radius: 6px; padding: 30px; text-align: center;
             background-color: #fafafa; transition: background-color 0.2s;
             cursor: pointer; margin-bottom: 20px; position: relative;
         }
-        #drop-zone:hover, #drop-zone.dragover { background-color: #e9ecef; border-color: var(--primary-color); }
+        #drop-zone:hover { background-color: #e9ecef; border-color: var(--primary-color); }
         
-        /* Fix for input triggering */
         #file-input {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             opacity: 0; cursor: pointer; display: block;
@@ -89,18 +87,18 @@
             color: #999; font-size: 1.2rem; display: none;
         }
         
-        /* Off-screen canvas for PDF */
         #pdf-canvas { position: fixed; left: -9999px; top: 0; }
+        #system-status { display:none; padding:10px; margin-bottom:10px; border-radius:4px; }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>RHEL SAR 分析工具 (v7)</h1>
+    <h1>RHEL SAR 分析工具 (v8 Smart)</h1>
     <button id="btn-pdf" class="btn-download">📥 下載 PDF 報表</button>
 </header>
 
-<div id="system-status" style="display:none; padding:10px; margin-bottom:10px; border-radius:4px;"></div>
+<div id="system-status"></div>
 
 <div id="drop-zone">
     <p>點擊此處或拖曳 SAR 檔案上傳</p>
@@ -110,11 +108,11 @@
 
 <div class="controls">
     <div class="control-group">
-        <label for="file-select">選擇檔案 (主機/日期)</label>
+        <label for="file-select">選擇檔案</label>
         <select id="file-select" disabled><option>請先上傳檔案</option></select>
     </div>
     <div class="control-group">
-        <label for="section-select">分析類別 (Section)</label>
+        <label for="section-select">分析類別</label>
         <select id="section-select" disabled></select>
     </div>
     <div class="control-group">
@@ -137,55 +135,53 @@
 <canvas id="pdf-canvas" width="1600" height="900"></canvas>
 
 <script>
-    /**
-     * 1. Global Error Trap & Init Check
-     */
-    window.onerror = function(message, source, lineno, colno, error) {
-        const statusDiv = document.getElementById('system-status');
-        statusDiv.style.display = 'block';
-        statusDiv.style.backgroundColor = '#f8d7da';
-        statusDiv.style.color = '#721c24';
-        statusDiv.textContent = `系統錯誤: ${message} (Line: ${lineno})`;
-        console.error("Global Error:", error);
-        return false;
+    window.onerror = function(msg) {
+        const d = document.getElementById('system-status');
+        d.style.display='block'; d.style.backgroundColor='#f8d7da'; d.style.color='#721c24';
+        d.textContent = `Error: ${msg}`;
     };
 
-    // Check libraries
-    document.addEventListener('DOMContentLoaded', () => {
-        const statusDiv = document.getElementById('system-status');
-        const missing = [];
-        if (typeof Chart === 'undefined') missing.push("Chart.js (圖表功能將失效)");
-        if (typeof window.jspdf === 'undefined') missing.push("jsPDF (PDF功能將失效)");
-        
-        if (missing.length > 0) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.backgroundColor = '#fff3cd';
-            statusDiv.style.color = '#856404';
-            statusDiv.textContent = `警告: 無法載入外部函式庫 (${missing.join(', ')})。請確認網路連接。您仍可解析檔案，但圖表與報表可能無法產生。`;
-        }
-    });
-
-    /**
-     * 2. Core Logic
-     */
     'use strict';
+
+    // --- Unit Configuration ---
+    const UNIT_CONFIG = {
+        // Memory (Convert KB to GB)
+        'kbmemfree': { label: 'GB', div: 1048576 }, 
+        'kbcommit': { label: 'GB', div: 1048576 },
+        'memused': { label: 'GB', div: 1048576 }, // Sometimes just memused without %
+        
+        // Network / Disk (Convert KB/s to MB/s)
+        'rxkB/s': { label: 'MB/s', div: 1024 },
+        'txkB/s': { label: 'MB/s', div: 1024 },
+        'rkB/s': { label: 'MB/s', div: 1024 },
+        'wkB/s': { label: 'MB/s', div: 1024 },
+        
+        // Percentages
+        '%usr': { label: '%', div: 1 },
+        '%sys': { label: '%', div: 1 },
+        '%iowait': { label: '%', div: 1 },
+        '%util': { label: '%', div: 1 },
+        '%memused': { label: '%', div: 1 },
+        '%swpused': { label: '%', div: 1 }
+    };
+
+    function getUnit(metricName) {
+        if (UNIT_CONFIG[metricName]) return UNIT_CONFIG[metricName];
+        if (metricName.startsWith('%')) return { label: '%', div: 1 };
+        if (metricName.startsWith('kb')) return { label: 'MB', div: 1024 }; // Default kb to MB if unknown
+        return { label: '', div: 1 };
+    }
 
     class SarParser {
         constructor() { this.filesData = {}; }
-
         parseFile(fileName, content) {
-            // Remove BOM
             if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
-
             const lines = content.split(/\r?\n/);
             const fileObj = { date: '', hostname: '', sections: {} };
-            
-            // Regex patterns
             const timeRegex = /^\s*\d{2}:\d{2}:\d{2}\s+/;
             
             let currentSectionName = null;
             let currentColumns = null;
-            let sectionHasInstance = false;
             let keyIndex = -1;
 
             const KNOWN_KEYS = ['CPU', 'IFACE', 'DEV', 'INTR', 'BUS', 'FAN', 'TEMP', 'IN', 'TTY'];
@@ -198,8 +194,6 @@
             lines.forEach(line => {
                 line = line.trim();
                 if (!line) return;
-
-                // Header Check (Loose)
                 if (line.startsWith('Linux')) {
                     const parts = line.split(/\s+/);
                     if (parts.length >= 4) {
@@ -208,32 +202,23 @@
                     }
                     return;
                 }
-
-                // Data Check
                 if (timeRegex.test(line)) {
                     if (line.includes('Average:')) return;
-
                     const parts = line.split(/\s+/);
                     
-                    // Heuristic: Header vs Data
                     let isHeader = false;
                     let numericCount = 0;
                     let textCount = 0;
-                    let checkLimit = Math.min(parts.length, 5);
-                    
-                    for (let i = 2; i < checkLimit; i++) {
+                    for (let i = 2; i < Math.min(parts.length, 5); i++) {
                         const val = parts[i];
-                        if (!isNaN(parseFloat(val)) || val === '-') numericCount++;
-                        else textCount++;
+                        if (!isNaN(parseFloat(val)) || val === '-') numericCount++; else textCount++;
                     }
-
                     if (textCount > numericCount) isHeader = true;
 
                     if (isHeader) {
                         const rawColumns = parts.slice(1);
                         keyIndex = -1;
                         let sectionIdentifier = rawColumns[0];
-
                         for (let i = 0; i < rawColumns.length; i++) {
                             if (KNOWN_KEYS.includes(rawColumns[i])) {
                                 keyIndex = i;
@@ -241,26 +226,18 @@
                                 break;
                             }
                         }
-
-                        if (SECTION_MAP[sectionIdentifier]) currentSectionName = SECTION_MAP[sectionIdentifier];
-                        else if (rawColumns.length > 0 && SECTION_MAP[rawColumns[0]]) currentSectionName = SECTION_MAP[rawColumns[0]];
-                        else currentSectionName = sectionIdentifier;
-
+                        currentSectionName = SECTION_MAP[sectionIdentifier] || SECTION_MAP[rawColumns[0]] || sectionIdentifier;
                         currentColumns = rawColumns;
-                        sectionHasInstance = (keyIndex !== -1);
-
                         if (!fileObj.sections[currentSectionName]) {
                             fileObj.sections[currentSectionName] = {
                                 columns: currentColumns,
-                                hasInstance: sectionHasInstance,
+                                hasInstance: (keyIndex !== -1),
                                 keyIndex: keyIndex,
                                 instances: {}
                             };
                         }
                     } else if (currentSectionName && currentColumns) {
-                         // Loose length check (allow +/- 3 cols diff)
                         if (Math.abs(parts.length - (currentColumns.length + 1)) > 3) return;
-
                         const time = parts[0];
                         const values = parts.slice(1);
                         const sectionDef = fileObj.sections[currentSectionName];
@@ -271,173 +248,125 @@
                         }
 
                         if (!sectionDef.instances[instanceName]) sectionDef.instances[instanceName] = [];
-
                         const metricObj = { time: time };
                         values.forEach((val, idx) => {
                             if (idx >= sectionDef.columns.length) return;
-                            const colName = sectionDef.columns[idx];
                             const floatVal = parseFloat(val);
-                            metricObj[colName] = (val === '-' || isNaN(floatVal)) ? 0 : floatVal;
+                            metricObj[sectionDef.columns[idx]] = (val === '-' || isNaN(floatVal)) ? 0 : floatVal;
                         });
-
                         sectionDef.instances[instanceName].push(metricObj);
                     }
                 }
             });
-
-            // Clean
             Object.keys(fileObj.sections).forEach(key => {
                 if (Object.keys(fileObj.sections[key].instances).length === 0) delete fileObj.sections[key];
             });
-
-            if (Object.keys(fileObj.sections).length === 0) throw new Error("No valid data sections found.");
+            if (Object.keys(fileObj.sections).length === 0) throw new Error("無效的檔案格式");
             
-            // Fallback
-            if (!fileObj.hostname) fileObj.hostname = "Unknown Host";
-            if (!fileObj.date) fileObj.date = "Unknown Date";
-
+            if (!fileObj.hostname) fileObj.hostname = "Unknown";
             const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
             this.filesData[fileId] = fileObj;
             return fileId;
         }
-
         getData() { return this.filesData; }
     }
 
-    // Init
     const parser = new SarParser();
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const fileListDisplay = document.getElementById('file-list-display');
-    const errorDisplay = document.getElementById('error-display');
-    const noDataMsg = document.getElementById('no-data-msg');
     const btnPdf = document.getElementById('btn-pdf');
-    
     const fileSelect = document.getElementById('file-select');
     const sectionSelect = document.getElementById('section-select');
     const itemSelect = document.getElementById('item-select');
     const metricSelect = document.getElementById('metric-select');
+    const fileInput = document.getElementById('file-input');
+    const dropZone = document.getElementById('drop-zone');
     let myChart = null;
 
-    // Use Change event on input directly (covered by CSS opacity)
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     
-    // Drag and Drop Visuals only (Input handles the click)
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#0056b3'; });
-    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#dee2e6'; });
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = '#dee2e6';
-        if(e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            fileInput.files = e.dataTransfer.files; // Assign to input
-            handleFiles(e.dataTransfer.files);
-        }
-    });
-
+    // UI Helpers
     function handleFiles(files) {
-        errorDisplay.style.display = 'none';
-        if (!files || files.length === 0) return;
-
-        const totalFiles = files.length;
-        let processedCount = 0;
-        const fileNames = [];
-
+        document.getElementById('error-display').style.display = 'none';
+        if (!files.length) return;
         Array.from(files).forEach(file => {
-            fileNames.push(file.name);
             const reader = new FileReader();
             reader.onload = (e) => {
                 try {
-                    const fileId = parser.parseFile(file.name, e.target.result);
-                    addOption(fileSelect, fileId, fileId);
-                } catch (err) {
-                    console.error(err);
-                    showError(`解析失敗 (${file.name}): ${err.message}`);
-                } finally {
-                    processedCount++;
-                    if (processedCount === totalFiles) {
-                        updateUIState();
-                        if (fileSelect.options.length > 0 && !fileSelect.disabled) btnPdf.style.display = 'block';
-                    }
-                }
+                    const id = parser.parseFile(file.name, e.target.result);
+                    addOption(fileSelect, id, id);
+                } catch(err) { alert(`解析失敗: ${file.name}`); }
+                finally { updateUI(); if(fileSelect.options.length > 0) btnPdf.style.display='block'; }
             };
-            reader.onerror = () => showError(`讀取錯誤: ${file.name}`);
             reader.readAsText(file);
         });
-        fileListDisplay.textContent = `已載入: ${fileNames.join(', ')}`;
+        document.getElementById('file-list-display').textContent = `已載入 ${files.length} 個檔案`;
     }
 
-    function showError(msg) {
-        errorDisplay.textContent = msg;
-        errorDisplay.style.display = 'block';
+    function addOption(sel, txt, val) {
+        if (sel.options[0]?.text.includes('請先')) { sel.innerHTML=''; sel.disabled=false; }
+        for(let i=0; i<sel.options.length; i++) if(sel.options[i].value===val) return;
+        sel.add(new Option(txt, val));
     }
+    
+    function updateUI() { if(fileSelect.options.length>0) fileSelect.dispatchEvent(new Event('change')); }
 
-    function addOption(select, text, value) {
-        if (select.options[0] && select.options[0].text.includes('請先上傳')) {
-            select.innerHTML = ''; select.disabled = false;
-        }
-        for (let i = 0; i < select.options.length; i++) if (select.options[i].value === value) return;
-        const opt = document.createElement('option');
-        opt.text = text; opt.value = value;
-        select.add(opt);
-    }
-
-    function updateUIState() {
-        if (fileSelect.options.length > 0) fileSelect.dispatchEvent(new Event('change'));
-    }
-
-    // UI Event Listeners
-    fileSelect.addEventListener('change', () => {
-        const val = fileSelect.value;
-        const data = parser.getData()[val];
-        sectionSelect.innerHTML = '';
-        if (!data) return;
+    // Smart Selection Logic
+    function findBestInstance(sectionData, metricHint) {
+        const instances = Object.keys(sectionData.instances);
+        if (instances.length === 1) return instances[0];
         
-        Object.keys(data.sections).sort().forEach(sec => {
-            const opt = document.createElement('option'); opt.value = sec; opt.text = sec; sectionSelect.add(opt);
+        // Filter out lo, face (header error), etc.
+        const candidates = instances.filter(i => i !== 'lo' && i !== 'face' && i !== 'all');
+        
+        if (candidates.length === 0) return instances[0];
+        if (candidates.length === 1) return candidates[0];
+
+        // Find max traffic
+        let best = candidates[0];
+        let maxTotal = 0;
+        
+        candidates.forEach(inst => {
+            const total = sectionData.instances[inst].reduce((acc, curr) => acc + (curr[metricHint] || 0), 0);
+            if (total > maxTotal) { maxTotal = total; best = inst; }
         });
-        sectionSelect.disabled = false;
         
-        if (sectionSelect.options.length > 0) {
-            const defaults = ['Disk I/O', 'CPU Usage', 'Memory'];
-            for(let d of defaults) {
-                if(data.sections[d]) { sectionSelect.value = d; break; }
-            }
-            sectionSelect.dispatchEvent(new Event('change'));
-        }
+        return best;
+    }
+
+    fileSelect.addEventListener('change', () => {
+        const data = parser.getData()[fileSelect.value];
+        sectionSelect.innerHTML = '';
+        if(!data) return;
+        Object.keys(data.sections).sort().forEach(s => sectionSelect.add(new Option(s, s)));
+        sectionSelect.disabled = false;
+        // Priority
+        const priority = ['Disk I/O', 'Network', 'CPU Usage'];
+        for(let p of priority) if(data.sections[p]) { sectionSelect.value=p; break; }
+        sectionSelect.dispatchEvent(new Event('change'));
     });
 
     sectionSelect.addEventListener('change', () => {
-        const fileId = fileSelect.value;
-        const sectionName = sectionSelect.value;
-        const data = parser.getData()[fileId]?.sections[sectionName];
+        const data = parser.getData()[fileSelect.value]?.sections[sectionSelect.value];
         itemSelect.innerHTML = ''; metricSelect.innerHTML = '';
-        if (!data) return;
+        if(!data) return;
 
-        const instances = Object.keys(data.instances);
-        instances.forEach(inst => {
-            const opt = document.createElement('option'); opt.value = inst; opt.text = inst; itemSelect.add(opt);
-        });
+        // Auto Select Best Instance
+        const bestInst = findBestInstance(data, 'rxkB/s'); // Hint for network, ignored otherwise
+        
+        Object.keys(data.instances).forEach(i => itemSelect.add(new Option(i, i)));
+        itemSelect.value = bestInst; // Set best
         itemSelect.disabled = false;
 
-        const firstInst = instances[0];
-        if (firstInst && data.instances[firstInst].length > 0) {
-            const sampleRow = data.instances[firstInst][0];
-            data.columns.forEach(col => {
-                if (typeof sampleRow[col] === 'number') {
-                    const opt = document.createElement('option'); opt.value = col; opt.text = col; metricSelect.add(opt);
-                }
-            });
-        }
+        // Metrics
+        const sample = data.instances[bestInst][0];
+        data.columns.forEach(c => {
+             if(typeof sample[c] === 'number') metricSelect.add(new Option(c, c));
+        });
         metricSelect.disabled = false;
-        if (instances.includes('all')) itemSelect.value = 'all';
         
-        const preferred = ['%util', 'tps', '%usr', 'kbmemfree', 'runq-sz', 'rxkB/s'];
-        for (const p of preferred) {
-            let found = false;
-            for(let i=0; i<metricSelect.options.length; i++) {
-                if(metricSelect.options[i].value === p) { metricSelect.value = p; found = true; break; }
-            }
-            if(found) break;
+        // Default Metric
+        const preferred = ['rxkB/s', '%util', '%usr', 'kbmemfree'];
+        for(let p of preferred) {
+            if(Array.from(metricSelect.options).some(o => o.value===p)) { metricSelect.value=p; break; }
         }
         renderChart();
     });
@@ -446,167 +375,142 @@
     metricSelect.addEventListener('change', renderChart);
 
     function renderChart() {
-        if (typeof Chart === 'undefined') return; // Safe guard
-
-        const fileId = fileSelect.value;
-        const sectionName = sectionSelect.value;
-        const instanceName = itemSelect.value;
-        const metricName = metricSelect.value;
-
-        if (!fileId || !sectionName || !instanceName || !metricName) {
-            if(myChart) myChart.destroy();
-            noDataMsg.style.display = 'block'; return;
-        }
-
-        const dataObj = parser.getData()[fileId];
-        if(!dataObj?.sections[sectionName]?.instances[instanceName]) {
-            if(myChart) myChart.destroy();
-            noDataMsg.style.display = 'block'; return;
-        }
-
-        noDataMsg.style.display = 'none';
-        const timeSeries = dataObj.sections[sectionName].instances[instanceName];
-        const labels = timeSeries.map(d => d.time);
-        const values = timeSeries.map(d => d[metricName]);
-
+        if(typeof Chart === 'undefined') return;
         const ctx = document.getElementById('sarChart').getContext('2d');
-        if (myChart) myChart.destroy();
+        const metric = metricSelect.value;
+        const unitInfo = getUnit(metric);
+        
+        const dataObj = parser.getData()[fileSelect.value];
+        const sectionData = dataObj.sections[sectionSelect.value];
+        const ts = sectionData.instances[itemSelect.value];
+        
+        const labels = ts.map(d => d.time);
+        const values = ts.map(d => (d[metric] / unitInfo.div));
 
+        if(myChart) myChart.destroy();
         myChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: `${metricName} (${instanceName})`,
+                    label: `${metric} (${unitInfo.label})`,
                     data: values,
                     borderColor: '#0056b3',
                     backgroundColor: 'rgba(0, 86, 179, 0.1)',
                     borderWidth: 2,
                     pointRadius: 0,
                     pointHitRadius: 10,
-                    fill: true,
-                    tension: 0.2
+                    fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    title: { display: true, text: `${dataObj.hostname} - ${sectionName}` },
+                scales: {
+                    y: { 
+                        beginAtZero: true,
+                        title: { display: true, text: unitInfo.label }
+                    }
                 },
-                scales: { x: { ticks: { maxTicksLimit: 20 } }, y: { beginAtZero: true } }
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: (c) => `${c.parsed.y.toFixed(2)} ${unitInfo.label}`
+                        }
+                    }
+                }
             }
         });
     }
 
-    // PDF Logic
+    // PDF Generation
     btnPdf.addEventListener('click', async () => {
-        if (typeof window.jspdf === 'undefined') {
-            alert("錯誤: jsPDF 函式庫未載入 (可能因為無網路)，無法產生報表。");
-            return;
-        }
-
+        if(typeof window.jspdf === 'undefined') return alert("PDF Lib Missing");
+        
+        btnPdf.disabled = true; btnPdf.textContent = '生成中...';
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('l', 'mm', 'a4');
         const fileId = fileSelect.value;
-        if (!fileId || fileId.includes('請先上傳')) return;
+        const dataObj = parser.getData()[fileId];
 
-        const originalText = btnPdf.textContent;
-        btnPdf.disabled = true;
-        btnPdf.textContent = '生成中...';
+        // Report Config
+        const reportConfig = [
+            { title: 'CPU Usage', section: 'CPU Usage', type: 'cpu', metrics: ['%usr', '%sys', '%iowait'] },
+            { title: 'Memory Usage', section: 'Memory', type: 'mem', metrics: ['kbmemfree', 'memused'] }, // removed %memused to keep scale uniform
+            { title: 'Network Traffic', section: 'Network', type: 'net', metrics: ['rxkB/s', 'txkB/s'] },
+            { title: 'Disk I/O', section: 'Disk I/O', type: 'disk', metrics: ['%util', 'await'] }
+        ];
 
-        try {
-            const dataObj = parser.getData()[fileId];
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('l', 'mm', 'a4');
-            const pageWidth = doc.internal.pageSize.getWidth();
+        doc.setFontSize(22);
+        doc.text(`SAR Report: ${dataObj.hostname}`, 15, 20);
+        doc.setFontSize(14);
+        doc.text(`Date: ${dataObj.date}`, 15, 30);
+
+        const pdfCanvas = document.getElementById('pdf-canvas');
+        pdfCanvas.width = 1600; pdfCanvas.height = 900;
+        const chartCtx = pdfCanvas.getContext('2d');
+
+        for(const config of reportConfig) {
+            const section = dataObj.sections[config.section];
+            if(!section) continue;
+
+            // Smart Instance Selection for PDF
+            let instance = 'all';
+            if(config.type === 'net') instance = findBestInstance(section, 'rxkB/s');
+            else if(config.type === 'disk') instance = findBestInstance(section, '%util');
+            else if(!section.instances['all']) instance = Object.keys(section.instances)[0];
+
+            if(!section.instances[instance]) continue;
+
+            const ts = section.instances[instance];
+            const labels = ts.map(d => d.time);
             
-            const reportConfig = [
-                { title: 'CPU Usage', section: 'CPU Usage', instance: 'all', metrics: ['%usr', '%sys', '%iowait'] },
-                { title: 'Memory Usage', section: 'Memory', instance: 'all', metrics: ['kbmemfree', '%memused', 'kbcommit'] },
-                { title: 'Load Average', section: 'Load / Queue', instance: 'all', metrics: ['runq-sz', 'ldavg-1'] },
-                { title: 'Disk I/O (Main)', section: 'Disk I/O', instance: 'first', metrics: ['%util', 'tps', 'await'] },
-                { title: 'Network Traffic', section: 'Network', instance: 'first', metrics: ['rxkB/s', 'txkB/s'] },
-                { title: 'Swap Usage', section: 'Swap', instance: 'all', metrics: ['%swpused'] }
-            ];
-
-            doc.setFontSize(24);
-            doc.text('SAR System Performance Report', pageWidth / 2, 80, { align: 'center' });
-            doc.setFontSize(16);
-            doc.text(`Hostname: ${dataObj.hostname}`, pageWidth / 2, 100, { align: 'center' });
-            doc.text(`Date: ${dataObj.date}`, pageWidth / 2, 110, { align: 'center' });
-
-            const pdfCanvas = document.getElementById('pdf-canvas');
-            const chartCtx = pdfCanvas.getContext('2d');
+            // Determine Unit from first metric
+            const baseUnit = getUnit(config.metrics[0]);
             
-            // Explicitly set size
-            pdfCanvas.width = 1600;
-            pdfCanvas.height = 900;
+            const datasets = config.metrics.map((m, i) => {
+                if(ts[0][m] === undefined) return null;
+                const u = getUnit(m);
+                // Note: Mixing units in one chart (e.g. % and GB) is bad practice. 
+                // We assume config groups similar units.
+                return {
+                    label: `${m} (${u.label})`,
+                    data: ts.map(d => d[m] / u.div),
+                    borderColor: ['#007bff','#dc3545','#28a745'][i%3],
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    tension: 0.1
+                };
+            }).filter(d => d);
 
-            for (const config of reportConfig) {
-                const sectionData = dataObj.sections[config.section];
-                if (!sectionData) continue;
+            if(datasets.length === 0) continue;
 
-                let targetInstance = 'all';
-                if (config.instance === 'first' || !sectionData.instances['all']) {
-                     const keys = Object.keys(sectionData.instances);
-                     if (keys.length > 0) targetInstance = keys[0]; else continue;
-                }
-
-                if (!sectionData.instances[targetInstance]) continue;
-
-                const timeSeries = sectionData.instances[targetInstance];
-                const labels = timeSeries.map(d => d.time);
-                
-                const datasets = config.metrics.map((metric, idx) => {
-                     if (typeof timeSeries[0][metric] === 'undefined') return null;
-                     const colors = ['#0056b3', '#d63384', '#28a745', '#fd7e14'];
-                     return {
-                         label: metric,
-                         data: timeSeries.map(d => d[metric]),
-                         borderColor: colors[idx % colors.length],
-                         borderWidth: 2,
-                         pointRadius: 0,
-                         fill: false,
-                         tension: 0.1
-                     };
-                }).filter(ds => ds !== null);
-
-                if (datasets.length === 0) continue;
-
-                if (window.tempChart) window.tempChart.destroy();
-
-                window.tempChart = new Chart(chartCtx, {
-                    type: 'line',
-                    data: { labels: labels, datasets: datasets },
-                    options: {
-                        responsive: false, animation: false,
-                        scales: { x: { ticks: { maxTicksLimit: 15 } }, y: { beginAtZero: true } },
-                        plugins: {
-                            legend: { position: 'top' },
-                            title: { display: true, text: `${config.title} (${targetInstance})`, font: { size: 18 } }
-                        }
+            if(window.tmpChart) window.tmpChart.destroy();
+            window.tmpChart = new Chart(chartCtx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    animation: false,
+                    responsive: false,
+                    scales: { 
+                        y: { beginAtZero: true, title: { display: true, text: baseUnit.label, font: {size: 24} }, ticks: { font: {size: 20} } },
+                        x: { ticks: { maxTicksLimit: 12, font: {size: 20} } }
+                    },
+                    plugins: {
+                        legend: { labels: { font: {size: 24} } },
+                        title: { display: true, text: `${config.title} - ${instance}`, font: {size: 32}, padding: 20 }
                     }
-                });
+                }
+            });
 
-                await new Promise(r => setTimeout(r, 200)); 
-
-                doc.addPage();
-                doc.setFontSize(14);
-                doc.text(`${config.title} - ${dataObj.hostname}`, 10, 15);
-                const imgData = pdfCanvas.toDataURL('image/png', 1.0);
-                doc.addImage(imgData, 'PNG', 10, 30, pageWidth - 20, 140);
-            }
-            doc.save(`SAR_Report_${dataObj.hostname}_${dataObj.date}.pdf`);
-        } catch (e) {
-            console.error(e);
-            alert("PDF 生成失敗: " + e.message);
-        } finally {
-            btnPdf.disabled = false;
-            btnPdf.textContent = originalText;
-            if (window.tempChart) window.tempChart.destroy();
+            await new Promise(r => setTimeout(r, 200));
+            doc.addPage();
+            doc.addImage(pdfCanvas.toDataURL('image/png', 1.0), 'PNG', 10, 10, 280, 150);
         }
+
+        doc.save(`SAR_Report_${dataObj.hostname}.pdf`);
+        btnPdf.disabled = false; btnPdf.textContent = '📥 下載 PDF 報表';
     });
 </script>
-
 </body>
 </html>
