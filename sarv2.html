@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RHEL SAR 分析與報表工具 (v4)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #0056b3;
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --border-color: #dee2e6;
+            --text-color: #333;
+            --btn-color: #28a745;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            color: var(--primary-color);
+        }
+
+        .btn-download {
+            background-color: var(--btn-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: none; /* Hidden until file loaded */
+        }
+
+        .btn-download:hover {
+            background-color: #218838;
+        }
+        
+        .btn-download:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #666;
+        }
+
+        select, input[type="file"] {
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background-color: #fff;
+        }
+
+        #drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            background-color: #fafafa;
+            transition: background-color 0.2s;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        #drop-zone.dragover {
+            background-color: #e9ecef;
+            border-color: var(--primary-color);
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            background: var(--card-bg);
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+
+        .error-msg { color: #dc3545; font-size: 0.9rem; margin-top: 5px; display: none; }
+        .file-list { margin-top: 5px; font-size: 0.85rem; color: #555; }
+        #no-data-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #999; font-size: 1.2rem; display: none;
+        }
+        
+        /* Hidden canvas for PDF generation */
+        #pdf-canvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>RHEL SAR 分析與報表工具 (v4)</h1>
+    <button id="btn-pdf" class="btn-download">📥 下載 PDF 報表</button>
+</header>
+
+<div id="drop-zone">
+    <p>點擊選擇或將 SAR 檔案拖曳至此處 (支援多檔)</p>
+    <input type="file" id="file-input" multiple style="display: none;">
+    <div id="file-list-display" class="file-list"></div>
+</div>
+
+<div class="controls">
+    <div class="control-group">
+        <label for="file-select">選擇檔案 (主機/日期)</label>
+        <select id="file-select" disabled><option>請先上傳檔案</option></select>
+    </div>
+    <div class="control-group">
+        <label for="section-select">分析類別 (Section)</label>
+        <select id="section-select" disabled></select>
+    </div>
+    <div class="control-group">
+        <label for="item-select">項目 (Instance)</label>
+        <select id="item-select" disabled></select>
+    </div>
+    <div class="control-group">
+        <label for="metric-select">指標 (Metric)</label>
+        <select id="metric-select" disabled></select>
+    </div>
+</div>
+
+<div id="error-display" class="error-msg"></div>
+
+<div class="chart-container">
+    <div id="no-data-msg">無此區塊資料</div>
+    <canvas id="sarChart"></canvas>
+</div>
+
+<canvas id="pdf-canvas" width="1600" height="900"></canvas>
+
+<script>
+    /**
+     * SAR Parser Logic (Robust v3 Core)
+     */
+    'use strict';
+
+    class SarParser {
+        constructor() { this.filesData = {}; }
+
+        parseFile(fileName, content) {
+            const lines = content.split(/\r?\n/);
+            const fileObj = { date: '', hostname: '', sections: {} };
+            const timeRegex = /^\d{2}:\d{2}:\d{2}\s+/;
+            const headerRegex = /^Linux\s+/;
+            
+            let currentSectionName = null;
+            let currentColumns = null;
+            let sectionHasInstance = false;
+            let keyIndex = -1;
+
+            const KNOWN_KEYS = ['CPU', 'IFACE', 'DEV', 'INTR', 'BUS', 'FAN', 'TEMP', 'IN', 'TTY'];
+            const SECTION_MAP = {
+                'CPU': 'CPU Usage', 'IFACE': 'Network', 'DEV': 'Disk I/O',
+                'kbmemfree': 'Memory', 'runq-sz': 'Load / Queue', 'plist-sz': 'Process List',
+                'tps': 'I/O & Transfer', 'pgpgin': 'Paging', 'TTY': 'TTY'
+            };
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line) return;
+
+                if (headerRegex.test(line)) {
+                    const parts = line.split(/\s+/);
+                    if (parts.length >= 4) {
+                        fileObj.hostname = parts[2].replace(/[()]/g, '');
+                        fileObj.date = parts[3];
+                    }
+                    return;
+                }
+
+                if (timeRegex.test(line)) {
+                    if (line.startsWith('Average:')) return; 
+                    const parts = line.split(/\s+/);
+                    
+                    // Header detection heuristic
+                    let isHeader = false;
+                    let numericCount = 0;
+                    let textCount = 0;
+                    let checkLimit = Math.min(parts.length, 5); 
+                    for (let i = 2; i < checkLimit; i++) {
+                        isNaN(parseFloat(parts[i])) ? textCount++ : numericCount++;
+                    }
+                    if (textCount > numericCount) isHeader = true;
+
+                    if (isHeader) {
+                        const rawColumns = parts.slice(1);
+                        keyIndex = -1;
+                        let sectionIdentifier = rawColumns[0];
+                        for (let i = 0; i < rawColumns.length; i++) {
+                            if (KNOWN_KEYS.includes(rawColumns[i])) {
+                                keyIndex = i;
+                                sectionIdentifier = rawColumns[i];
+                                break;
+                            }
+                        }
+                        if (SECTION_MAP[sectionIdentifier]) currentSectionName = SECTION_MAP[sectionIdentifier];
+                        else if (rawColumns.length > 0 && SECTION_MAP[rawColumns[0]]) currentSectionName = SECTION_MAP[rawColumns[0]];
+                        else currentSectionName = sectionIdentifier;
+
+                        currentColumns = rawColumns;
+                        sectionHasInstance = (keyIndex !== -1);
+                        if (!fileObj.sections[currentSectionName]) {
+                            fileObj.sections[currentSectionName] = {
+                                columns: currentColumns, hasInstance: sectionHasInstance, keyIndex: keyIndex, instances: {}
+                            };
+                        }
+                    } else if (currentSectionName && currentColumns) {
+                        if (Math.abs(parts.length - (currentColumns.length + 1)) > 1) return;
+                        const time = parts[0];
+                        const values = parts.slice(1);
+                        const sectionDef = fileObj.sections[currentSectionName];
+                        let instanceName = 'all';
+                        if (sectionDef.hasInstance && sectionDef.keyIndex < values.length) {
+                            instanceName = values[sectionDef.keyIndex];
+                        }
+                        if (!sectionDef.instances[instanceName]) sectionDef.instances[instanceName] = [];
+
+                        const metricObj = { time: time };
+                        values.forEach((val, idx) => {
+                            const colName = sectionDef.columns[idx];
+                            if (!colName) return;
+                            const numVal = parseFloat(val);
+                            metricObj[colName] = isNaN(numVal) ? val : numVal;
+                        });
+                        sectionDef.instances[instanceName].push(metricObj);
+                    }
+                }
+            });
+
+            // Cleanup
+            Object.keys(fileObj.sections).forEach(key => {
+                if (Object.keys(fileObj.sections[key].instances).length === 0) delete fileObj.sections[key];
+            });
+
+            const fileId = `${fileObj.hostname} (${fileObj.date}) [${fileName}]`;
+            this.filesData[fileId] = fileObj;
+            return fileId;
+        }
+
+        getData() { return this.filesData; }
+    }
+
+    /**
+     * UI & Chart Logic
+     */
+    const parser = new SarParser();
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileListDisplay = document.getElementById('file-list-display');
+    const errorDisplay = document.getElementById('error-display');
+    const noDataMsg = document.getElementById('no-data-msg');
+    const btnPdf = document.getElementById('btn-pdf');
+    
+    const fileSelect = document.getElementById('file-select');
+    const sectionSelect = document.getElementById('section-select');
+    const itemSelect = document.getElementById('item-select');
+    const metricSelect = document.getElementById('metric-select');
+    let myChart = null;
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault(); dropZone.classList.remove('dragover');
+        handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function handleFiles(files) {
+        errorDisplay.style.display = 'none';
+        const totalFiles = files.length;
+        let processedCount = 0;
+        const fileNames = [];
+
+        Array.from(files).forEach(file => {
+            fileNames.push(file.name);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const fileId = parser.parseFile(file.name, e.target.result);
+                    addOption(fileSelect, fileId, fileId);
+                } catch (err) { console.error(err); } 
+                finally {
+                    processedCount++;
+                    if (processedCount === totalFiles) {
+                        updateUIState();
+                        btnPdf.style.display = 'block';
+                    }
+                }
+            };
+            reader.readAsText(file);
+        });
+        fileListDisplay.textContent = `已載入: ${fileNames.join(', ')}`;
+    }
+
+    function addOption(select, text, value) {
+        if (select.options[0] && select.options[0].text.includes('請先上傳')) {
+            select.innerHTML = ''; select.disabled = false;
+        }
+        for (let i = 0; i < select.options.length; i++) if (select.options[i].value === value) return;
+        const opt = document.createElement('option');
+        opt.text = text; opt.value = value;
+        select.add(opt);
+    }
+
+    function updateUIState() {
+        if (fileSelect.options.length > 0) fileSelect.dispatchEvent(new Event('change'));
+    }
+
+    // Cascading Selects Logic
+    fileSelect.addEventListener('change', () => {
+        const data = parser.getData()[fileSelect.value];
+        sectionSelect.innerHTML = '';
+        if (!data) return;
+        Object.keys(data.sections).sort().forEach(sec => {
+            const opt = document.createElement('option'); opt.value = sec; opt.text = sec;
+            sectionSelect.add(opt);
+        });
+        sectionSelect.disabled = false;
+        if (sectionSelect.options.length > 0) {
+            const defaults = ['Disk I/O', 'CPU Usage', 'Memory'];
+            for(let d of defaults) {
+                if(data.sections[d]) { sectionSelect.value = d; break; }
+            }
+            sectionSelect.dispatchEvent(new Event('change'));
+        }
+    });
+
+    sectionSelect.addEventListener('change', () => {
+        const fileId = fileSelect.value;
+        const sectionName = sectionSelect.value;
+        const data = parser.getData()[fileId].sections[sectionName];
+        itemSelect.innerHTML = ''; metricSelect.innerHTML = '';
+        if (!data) return;
+
+        const instances = Object.keys(data.instances);
+        instances.forEach(inst => {
+            const opt = document.createElement('option'); opt.value = inst; opt.text = inst;
+            itemSelect.add(opt);
+        });
+        itemSelect.disabled = false;
+
+        const firstInst = instances[0];
+        if (firstInst && data.instances[firstInst].length > 0) {
+            const sampleRow = data.instances[firstInst][0];
+            data.columns.forEach(col => {
+                if (typeof sampleRow[col] === 'number') {
+                    const opt = document.createElement('option'); opt.value = col; opt.text = col;
+                    metricSelect.add(opt);
+                }
+            });
+        }
+        metricSelect.disabled = false;
+        
+        if (instances.includes('all')) itemSelect.value = 'all';
+        const preferred = ['%util', 'tps', '%usr', 'kbmemfree', 'runq-sz'];
+        for (const p of preferred) {
+            let found = false;
+            for(let i=0; i<metricSelect.options.length; i++) {
+                if(metricSelect.options[i].value === p) { metricSelect.value = p; found = true; break; }
+            }
+            if(found) break;
+        }
+        renderChart();
+    });
+
+    itemSelect.addEventListener('change', renderChart);
+    metricSelect.addEventListener('change', renderChart);
+
+    function renderChart() {
+        const fileId = fileSelect.value;
+        const sectionName = sectionSelect.value;
+        const instanceName = itemSelect.value;
+        const metricName = metricSelect.value;
+
+        if (!fileId || !sectionName || !instanceName || !metricName) {
+            if(myChart) myChart.destroy();
+            noDataMsg.style.display = 'block'; return;
+        }
+
+        const dataObj = parser.getData()[fileId];
+        if(!dataObj?.sections[sectionName]?.instances[instanceName]) {
+            if(myChart) myChart.destroy();
+            noDataMsg.style.display = 'block'; return;
+        }
+
+        noDataMsg.style.display = 'none';
+        const timeSeries = dataObj.sections[sectionName].instances[instanceName];
+        const labels = timeSeries.map(d => d.time);
+        const values = timeSeries.map(d => d[metricName]);
+
+        const ctx = document.getElementById('sarChart').getContext('2d');
+        if (myChart) myChart.destroy();
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: `${metricName} (${instanceName})`,
+                    data: values,
+                    borderColor: '#0056b3',
+                    backgroundColor: 'rgba(0, 86, 179, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0, 
+                    pointHitRadius: 10,
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    title: { display: true, text: `${dataObj.hostname} - ${sectionName}` },
+                },
+                scales: { x: { ticks: { maxTicksLimit: 20 } }, y: { beginAtZero: true } }
+            }
+        });
+    }
+
+    /**
+     * PDF Generation Logic
+     */
+    btnPdf.addEventListener('click', async () => {
+        const fileId = fileSelect.value;
+        if (!fileId || fileId.includes('請先上傳')) return;
+
+        btnPdf.disabled = true;
+        btnPdf.textContent = '生成報表中...';
+
+        const dataObj = parser.getData()[fileId];
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('l', 'mm', 'a4'); // Landscape, A4
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        
+        // Report Configuration: What to print
+        // Structure: { section: 'Name', metrics: ['col1', 'col2'], instanceStrategy: 'all' | 'first' | 'all-instances' }
+        const reportConfig = [
+            { title: 'CPU Usage', section: 'CPU Usage', instance: 'all', metrics: ['%usr', '%sys', '%iowait'] },
+            { title: 'Memory', section: 'Memory', instance: 'all', metrics: ['kbmemfree', '%memused', 'kbcommit'] },
+            { title: 'Load Average', section: 'Load / Queue', instance: 'all', metrics: ['runq-sz', 'ldavg-1'] },
+            { title: 'Disk I/O (Main)', section: 'Disk I/O', instance: 'first', metrics: ['%util', 'tps', 'await'] },
+            { title: 'Network', section: 'Network', instance: 'first', metrics: ['rxkB/s', 'txkB/s'] },
+            { title: 'Swap', section: 'Swap', instance: 'all', metrics: ['%swpused'] }
+        ];
+
+        // 1. Title Page
+        doc.setFontSize(24);
+        doc.text('SAR System Performance Report', pageWidth / 2, 80, { align: 'center' });
+        doc.setFontSize(16);
+        doc.text(`Hostname: ${dataObj.hostname}`, pageWidth / 2, 100, { align: 'center' });
+        doc.text(`Date: ${dataObj.date}`, pageWidth / 2, 110, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text(`Generated by SAR Web Tool`, pageWidth / 2, 180, { align: 'center' });
+
+        // Helper: Generate Chart on hidden canvas and add to PDF
+        const pdfCanvas = document.getElementById('pdf-canvas');
+        
+        for (const config of reportConfig) {
+            const sectionData = dataObj.sections[config.section];
+            if (!sectionData) continue; // Skip if section missing
+
+            // Determine Instance
+            let targetInstance = null;
+            if (config.instance === 'all' && sectionData.instances['all']) targetInstance = 'all';
+            else if (config.instance === 'first') targetInstance = Object.keys(sectionData.instances)[0];
+            else if (sectionData.instances['all']) targetInstance = 'all'; // fallback
+            else targetInstance = Object.keys(sectionData.instances)[0];
+
+            if (!targetInstance) continue;
+
+            const timeSeries = sectionData.instances[targetInstance];
+            const labels = timeSeries.map(d => d.time);
+
+            // Create datasets for multiple metrics in one chart
+            const datasets = config.metrics.map((metric, idx) => {
+                // Check if metric exists
+                if (typeof timeSeries[0][metric] === 'undefined') return null;
+                const colors = ['#0056b3', '#d63384', '#28a745', '#fd7e14'];
+                return {
+                    label: metric,
+                    data: timeSeries.map(d => d[metric]),
+                    borderColor: colors[idx % colors.length],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.1
+                };
+            }).filter(ds => ds !== null);
+
+            if (datasets.length === 0) continue;
+
+            // Render Chart
+            const chartCtx = pdfCanvas.getContext('2d');
+            // Destroy previous chart instance on this canvas if any manually? 
+            // Actually creating a new chart instance on same canvas needs cleanup.
+            // We use a temporary Chart instance.
+            
+            const tempChart = new Chart(chartCtx, {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: false,
+                    animation: false, // Critical for sync export
+                    scales: { 
+                        x: { ticks: { maxTicksLimit: 15 } },
+                        y: { beginAtZero: true }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: `${config.title} (${targetInstance})`, font: { size: 18 } }
+                    }
+                }
+            });
+
+            // Add Page and Image
+            doc.addPage();
+            
+            // Header
+            doc.setFontSize(14);
+            doc.text(`${config.title} - ${dataObj.hostname} (${dataObj.date})`, 10, 15);
+            
+            // Convert canvas to image
+            const imgData = pdfCanvas.toDataURL('image/png', 1.0);
+            doc.addImage(imgData, 'PNG', 10, 30, pageWidth - 20, 140); // Adjust fit
+
+            // Description
+            doc.setFontSize(10);
+            doc.text(`Metrics: ${datasets.map(d=>d.label).join(', ')}`, 10, 180);
+
+            tempChart.destroy();
+        }
+
+        doc.save(`SAR_Report_${dataObj.hostname}_${dataObj.date}.pdf`);
+
+        btnPdf.disabled = false;
+        btnPdf.textContent = '📥 下載 PDF 報表';
+    });
+
+</script>
+
+</body>
+</html>
