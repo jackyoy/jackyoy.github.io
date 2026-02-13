@@ -3,31 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Log Data Visualizer</title>
+    <title>System Monitor Log Visualizer</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; color: #333; }
-        .container { max-width: 1000px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
-        #canvas-container { position: relative; margin-top: 20px; }
-        button { cursor: pointer; padding: 8px 16px; border: none; border-radius: 4px; background: #007bff; color: white; }
-        button:disabled { background: #ccc; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; background: #f8f9fa; }
+        .container { max-width: 1100px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .header { border-bottom: 2px solid #eee; margin-bottom: 20px; padding-bottom: 10px; }
+        .controls { margin-bottom: 25px; display: flex; gap: 12px; }
+        #canvas-container { background: #fff; padding: 10px; border: 1px solid #eee; }
+        button { cursor: pointer; padding: 10px 20px; border: none; border-radius: 6px; background: #2c3e50; color: white; font-weight: 600; transition: 0.2s; }
+        button:hover { background: #34495e; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+        input[type="file"] { border: 1px solid #ddd; padding: 7px; border-radius: 6px; }
     </style>
 </head>
 <body>
 
 <div class="container" id="report-area">
-    <h2>設備監控日誌分析</h2>
+    <div class="header">
+        <h2>設備效能監控報告</h2>
+    </div>
     
     <div class="controls">
         <input type="file" id="fileInput" accept=".log,.txt">
-        <button id="exportBtn" disabled>下載 PDF</button>
+        <button id="exportBtn" disabled>下載 PDF 報告</button>
     </div>
 
     <div id="canvas-container">
-        <canvas id="cpuChart"></canvas>
+        <canvas id="monitorChart"></canvas>
     </div>
 </div>
 
@@ -50,56 +55,81 @@
             renderChart(data);
             exportBtn.disabled = false;
         } else {
-            alert('無法解析日誌格式，請檢查內容是否正確。');
+            alert('解析失敗：未找到符合格式的日誌數據。');
         }
     }
 
     function parseLog(content) {
         const labels = [];
         const cpuValues = [];
+        const ramValues = [];
         
-        // 正則表達式：匹配 [YYYY-MM-DD HH:mm:ss] 與 CPU Load (1min): 數值
+        // 分別匹配時間、CPU、RAM
         const timeRegex = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/g;
-        const loadRegex = /CPU Load \(1min\):\s*([\d.]+)/g;
+        const cpuRegex = /CPU Load \(1min\):\s*([\d.]+)/g;
+        const ramRegex = /RAM Used:\s*([\d.]+)/g;
         
-        let timeMatch;
-        let loadMatch;
-
-        while ((timeMatch = timeRegex.exec(content)) !== null && (loadMatch = loadRegex.exec(content)) !== null) {
-            labels.push(timeMatch[1]);
-            cpuValues.push(parseFloat(loadMatch[1]));
+        let t, c, r;
+        // 循環提取每一組數據
+        while ((t = timeRegex.exec(content)) !== null && 
+               (c = cpuRegex.exec(content)) !== null && 
+               (r = ramRegex.exec(content)) !== null) {
+            labels.push(t[1]);
+            cpuValues.push(parseFloat(c[1]));
+            ramValues.push(parseFloat(r[1]));
         }
 
-        return { labels, cpuValues };
+        return { labels, cpuValues, ramValues };
     }
 
     function renderChart(data) {
-        const ctx = document.getElementById('cpuChart').getContext('2d');
-        
-        if (chartInstance) {
-            chartInstance.destroy();
-        }
+        const ctx = document.getElementById('monitorChart').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
 
         chartInstance = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: data.labels,
-                datasets: [{
-                    label: 'CPU Load (1min)',
-                    data: data.cpuValues,
-                    borderColor: '#007bff',
-                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                    borderWidth: 1,
-                    pointRadius: 1,
-                    fill: true,
-                    tension: 0.1
-                }]
+                datasets: [
+                    {
+                        label: 'CPU Load (%)',
+                        data: data.cpuValues,
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        yAxisID: 'y',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'RAM Used (GiB)',
+                        data: data.ramValues,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        yAxisID: 'y1',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.2
+                    }
+                ]
             },
             options: {
                 responsive: true,
+                interaction: { mode: 'index', intersect: false },
                 scales: {
-                    x: { display: true, title: { display: true, text: '時間戳記' } },
-                    y: { display: true, title: { display: true, text: '負載 %' }, beginAtZero: true }
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'CPU 負載 (%)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        title: { display: true, text: '記憶體使用 (GiB)' }
+                    }
                 }
             }
         });
@@ -108,23 +138,21 @@
     async function exportToPDF() {
         const { jsPDF } = window.jspdf;
         const element = document.getElementById('report-area');
-        
-        // 暫時隱藏按鈕避免出現在 PDF 中
         const controls = document.querySelector('.controls');
-        controls.style.display = 'none';
+        
+        controls.style.visibility = 'hidden';
 
         const canvas = await html2canvas(element, { scale: 2 });
         const imgData = canvas.toDataURL('image/png');
         
         const pdf = new jsPDF('l', 'mm', 'a4');
-        const imgProps = pdf.getImageProperties(imgData);
         const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
         pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-        pdf.save(`System_Log_Report_${Date.now()}.pdf`);
+        pdf.save('System_Performance_Report.pdf');
         
-        controls.style.display = 'flex';
+        controls.style.visibility = 'visible';
     }
 </script>
 
