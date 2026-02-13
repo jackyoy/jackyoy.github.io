@@ -2,18 +2,17 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>System Monitor Professional Report</title>
+    <title>專業級設備效能監控報告</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: -apple-system, "Segoe UI", sans-serif; padding: 20px; background: #f4f7f9; }
-        .container { max-width: 1300px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; margin-bottom: 20px; padding-bottom: 15px; }
-        .controls { background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; border: 1px solid #e0e0e0; }
-        button { cursor: pointer; padding: 10px 20px; border: none; border-radius: 6px; font-weight: 600; transition: 0.2s; background: #007bff; color: white; }
-        button:hover { background: #0056b3; }
-        #saveHtmlBtn { background: #28a745; display: none; }
-        .canvas-wrapper { position: relative; height: 65vh; width: 100%; }
-        .tip { font-size: 12px; color: #666; margin-top: 5px; }
+        body { font-family: -apple-system, system-ui, sans-serif; padding: 20px; background: #f8f9fa; color: #333; }
+        .container { max-width: 1400px; margin: auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .header { border-bottom: 2px solid #eee; margin-bottom: 25px; padding-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .controls { background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #007bff; display: flex; gap: 20px; align-items: center; }
+        .status-tag { padding: 4px 12px; border-radius: 20px; font-size: 12px; background: #e9ecef; }
+        button { cursor: pointer; padding: 12px 24px; border: none; border-radius: 6px; font-weight: 600; background: #28a745; color: white; display: none; }
+        .canvas-container { position: relative; height: 500px; width: 100%; margin-top: 20px; }
+        #loadingOverlay { display: none; color: #007bff; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -21,48 +20,75 @@
 <div class="container">
     <div class="header">
         <h2 style="margin:0;">設備效能分析監控報告</h2>
-        <div id="report-time"></div>
+        <div id="fileInfo" class="status-tag">等待上傳檔案...</div>
     </div>
 
-    <div class="controls" id="ui-controls">
+    <div class="controls">
         <input type="file" id="fileInput" accept=".log,.txt">
-        <button id="saveHtmlBtn">儲存為互動 HTML 報告</button>
-        <span class="tip">支援拖放文件，滑鼠懸停圖表可查看精確數值</span>
+        <div id="loadingOverlay">系統處理中，請稍候...</div>
+        <button id="saveHtmlBtn">導出互動報告 (HTML)</button>
     </div>
 
-    <div class="canvas-wrapper">
+    <div class="canvas-container">
         <canvas id="monitorChart"></canvas>
     </div>
 </div>
 
 <script>
     let chartInstance = null;
-    let lastData = null;
+    let reportData = null;
 
-    document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const fileInput = document.getElementById('fileInput');
+    const loading = document.getElementById('loadingOverlay');
+    const saveBtn = document.getElementById('saveHtmlBtn');
+
+    fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const text = await file.text();
-        lastData = parseLog(text);
-        renderChart(lastData);
-        document.getElementById('saveHtmlBtn').style.display = 'inline-block';
-        document.getElementById('report-time').innerText = "報告生成時間: " + new Date().toLocaleString();
+
+        loading.style.display = 'block';
+        document.getElementById('fileInfo').innerText = `正在讀取: ${file.name}`;
+
+        // 使用 FileReader 確保大型檔案讀取不阻塞
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const text = event.target.result;
+            processLogData(text);
+        };
+        reader.readAsText(file);
     });
 
-    document.getElementById('saveHtmlBtn').addEventListener('click', () => generateStandaloneHtml());
-
-    function parseLog(content) {
+    function processLogData(content) {
+        // 優化後的 Regex：支援更多空白符號 (\s) 與處理可能損壞的行
         const labels = [], cpu = [], ram = [];
-        const tRegex = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/g;
-        const cRegex = /CPU Load \(1min\):\s*([\d.]+)/g;
-        const rRegex = /RAM Used:\s*([\d.]+)/g;
-        let t, c, r;
-        while ((t = tRegex.exec(content)) && (c = cpuRegex.exec(content)) && (r = rRegex.exec(content))) {
-            labels.push(t[1]); 
-            cpu.push(parseFloat(c[1])); 
-            ram.push(parseFloat(r[1]));
+        
+        // 修正後的匹配邏輯：先切分區塊再精確提取，避免全域匹配因單行出錯而崩潰
+        const lines = content.split('\n');
+        let currentTime = "";
+
+        lines.forEach(line => {
+            const tMatch = line.match(/\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\]/);
+            if (tMatch) currentTime = tMatch[1];
+
+            const cMatch = line.match(/CPU Load\s*\(1min\):\s*([\d.]+)/);
+            const rMatch = line.match(/RAM Used:\s*([\d.]+)/);
+
+            if (currentTime && cMatch && rMatch) {
+                labels.push(currentTime);
+                cpu.push(parseFloat(cMatch[1]));
+                ram.push(parseFloat(rMatch[1]));
+                currentTime = ""; // 重置，確保下一組數據配對正確
+            }
+        });
+
+        if (labels.length > 0) {
+            reportData = { labels, cpu, ram };
+            renderChart(reportData);
+            saveBtn.style.display = 'block';
+        } else {
+            alert('無法偵測到數據，請確認 Log 格式是否包含日期、CPU Load 與 RAM Used。');
         }
-        return { labels, cpu, ram };
+        loading.style.display = 'none';
     }
 
     function renderChart(data) {
@@ -77,113 +103,78 @@
                     {
                         label: 'CPU Load (%)',
                         data: data.cpu,
-                        borderColor: 'rgba(231, 76, 60, 0.8)',
-                        backgroundColor: 'rgba(231, 76, 60, 0.05)',
-                        yAxisID: 'y',
-                        borderWidth: 1.5,
-                        pointRadius: 0,        // 核心修正：移除圓點標記
-                        pointHoverRadius: 4,   // 僅在懸停時顯示點
-                        tension: 0.1,          // 輕微平滑
-                        fill: true
+                        borderColor: '#e74c3c',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        yAxisID: 'y'
                     },
                     {
                         label: 'RAM Used (GiB)',
                         data: data.ram,
-                        borderColor: 'rgba(52, 152, 219, 0.8)',
-                        yAxisID: 'y1',
+                        borderColor: '#3498db',
                         borderWidth: 2,
-                        pointRadius: 0,        // 核心修正：移除圓點標記
-                        pointHoverRadius: 4,
-                        tension: 0,            // RAM 通常呈階梯狀，不建議平滑
-                        stepped: true          // 採用階梯線顯示記憶體變化更精確
+                        pointRadius: 0,
+                        stepped: true,
+                        yAxisID: 'y1'
                     }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                // 效能優化關鍵：禁用不必要的動畫與元素
+                animation: false, 
+                elements: { line: { capBezierPoints: false } },
                 interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { position: 'top' },
-                    tooltip: { enabled: true, padding: 10 }
-                },
                 scales: {
-                    x: {
-                        ticks: {
-                            maxRotation: 45,
-                            autoSkip: true,    // 自動跳過重疊標籤
-                            maxTicksLimit: 15  // 限制標籤數量
-                        }
-                    },
-                    y: { 
-                        type: 'linear', 
-                        position: 'left', 
-                        title: { display: true, text: 'CPU (%)' },
-                        min: 0 
-                    },
-                    y1: { 
-                        type: 'linear', 
-                        position: 'right', 
-                        title: { display: true, text: 'RAM (GiB)' },
-                        grid: { drawOnChartArea: false }
-                    }
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                    y: { position: 'left', title: { display: true, text: 'CPU %' } },
+                    y1: { position: 'right', title: { display: true, text: 'RAM (GiB)' }, grid: { drawOnChartArea: false } }
                 }
             }
         });
     }
 
-    function generateStandaloneHtml() {
-        const dataJson = JSON.stringify(lastData);
-        const reportHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>System Performance Report</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; background: #fff; }
-        .container { max-width: 1200px; margin: auto; border: 1px solid #ddd; padding: 20px; }
-        h2 { border-left: 5px solid #007bff; padding-left: 10px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>系統效能歷史報告 - 互動版本</h2>
-        <p>生成時間: ${new Date().toLocaleString()}</p>
-        <div style="height: 600px;"><canvas id="c"></canvas></div>
-    </div>
-    <script>
-        const data = ${dataJson};
-        new Chart(document.getElementById('c'), {
-            type: 'line',
-            data: {
-                labels: data.labels,
-                datasets: [
-                    { label: 'CPU (%)', data: data.cpu, borderColor: '#e74c3c', yAxisID: 'y', pointRadius: 0, tension: 0.1 },
-                    { label: 'RAM (GiB)', data: data.ram, borderColor: '#3498db', yAxisID: 'y1', pointRadius: 0, stepped: true }
-                ]
-            },
-            options: { 
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: { 
-                    x: { ticks: { autoSkip: true, maxTicksLimit: 20 } },
-                    y: { position: 'left', title: { display: true, text: 'CPU %' } }, 
-                    y1: { position: 'right', title: { display: true, text: 'GiB' }, grid: { drawOnChartArea: false } } 
-                } 
-            }
-        });
-    <\/script>
-</body>
-</html>`;
-
-        const blob = new Blob([reportHtml], { type: 'text/html' });
+    saveBtn.onclick = () => {
+        const dataStr = JSON.stringify(reportData);
+        const htmlContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>數據報告</title>
+                <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+            </head>
+            <body>
+                <h2>系統效能歷史報告</h2>
+                <div style="height:600px"><canvas id="c"></canvas></div>
+                <script>
+                    const d = ${dataStr};
+                    new Chart(document.getElementById('c'), {
+                        type: 'line',
+                        data: {
+                            labels: d.labels,
+                            datasets: [
+                                { label: 'CPU %', data: d.cpu, borderColor: '#e74c3c', pointRadius: 0 },
+                                { label: 'RAM GiB', data: d.ram, borderColor: '#3498db', pointRadius: 0, yAxisID: 'y1', stepped: true }
+                            ]
+                        },
+                        options: { 
+                            scales: { y1: { position: 'right' } },
+                            interaction: { mode: 'index', intersect: false }
+                        }
+                    });
+                <\/script>
+            </body>
+            </html>
+        `;
+        const blob = new Blob([htmlContent], { type: 'text/html' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = "Report_Interactive.html";
+        a.download = `Report_${Date.now()}.html`;
         a.click();
-    }
+    };
 </script>
 </body>
 </html>
