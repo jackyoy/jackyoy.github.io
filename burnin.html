@@ -135,8 +135,8 @@
                 interaction: { mode: 'index', intersect: false },
                 scales: {
                     x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
-                    y: { position: 'left', title: { display: true, text: 'CPU %' } },
-                    y1: { position: 'right', title: { display: true, text: 'RAM (GiB)' }, grid: { drawOnChartArea: false } }
+                    y: { position: 'left', title: { display: true, text: 'CPU (%)' }, beginAtZero: true },
+                    y1: { position: 'right', title: { display: true, text: 'RAM (GiB)' }, grid: { drawOnChartArea: false }, beginAtZero: false }
                 }
             }
         });
@@ -151,11 +151,17 @@
                 <meta charset="UTF-8">
                 <title>${currentDevice} - 效能報告</title>
                 <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+                <style>
+                    body { font-family: sans-serif; padding: 30px; background: #fff; }
+                    .report-container { max-width: 1200px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 8px; }
+                </style>
             </head>
             <body>
-                <h2>${currentDevice} - 系統效能歷史報告</h2>
-                <p>生成時間: ${new Date().toLocaleString()}</p>
-                <div style="height:600px"><canvas id="c"></canvas></div>
+                <div class="report-container">
+                    <h2>${currentDevice} - 系統效能歷史報告</h2>
+                    <p>報告生成時間: ${new Date().toLocaleString()}</p>
+                    <div style="height:600px"><canvas id="c"></canvas></div>
+                </div>
                 <script>
                     const d = ${dataStr};
                     new Chart(document.getElementById('c'), {
@@ -163,13 +169,18 @@
                         data: {
                             labels: d.labels,
                             datasets: [
-                                { label: 'CPU %', data: d.cpu, borderColor: '#e74c3c', pointRadius: 0 },
-                                { label: 'RAM GiB', data: d.ram, borderColor: '#3498db', pointRadius: 0, yAxisID: 'y1', stepped: true }
+                                { label: 'CPU (%)', data: d.cpu, borderColor: '#e74c3c', pointRadius: 0, yAxisID: 'y', tension: 0.1 },
+                                { label: 'RAM (GiB)', data: d.ram, borderColor: '#3498db', pointRadius: 0, yAxisID: 'y1', stepped: true }
                             ]
                         },
                         options: { 
-                            scales: { y1: { position: 'right' } },
-                            interaction: { mode: 'index', intersect: false }
+                            maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            scales: { 
+                                x: { ticks: { autoSkip: true, maxTicksLimit: 15 } },
+                                y: { position: 'left', title: { display: true, text: 'CPU (%)' }, beginAtZero: true },
+                                y1: { position: 'right', title: { display: true, text: 'RAM (GiB)' }, grid: { drawOnChartArea: false } } 
+                            }
                         }
                     });
                 <\/script>
