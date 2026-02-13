@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Data Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; color: #333; }
+        .container { max-width: 1000px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        #canvas-container { position: relative; margin-top: 20px; }
+        button { cursor: pointer; padding: 8px 16px; border: none; border-radius: 4px; background: #007bff; color: white; }
+        button:disabled { background: #ccc; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="report-area">
+    <h2>設備監控日誌分析</h2>
+    
+    <div class="controls">
+        <input type="file" id="fileInput" accept=".log,.txt">
+        <button id="exportBtn" disabled>下載 PDF</button>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="cpuChart"></canvas>
+    </div>
+</div>
+
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const exportBtn = document.getElementById('exportBtn');
+    let chartInstance = null;
+
+    fileInput.addEventListener('change', handleFile);
+    exportBtn.addEventListener('click', exportToPDF);
+
+    async function handleFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const text = await file.text();
+        const data = parseLog(text);
+
+        if (data.labels.length > 0) {
+            renderChart(data);
+            exportBtn.disabled = false;
+        } else {
+            alert('無法解析日誌格式，請檢查內容是否正確。');
+        }
+    }
+
+    function parseLog(content) {
+        const labels = [];
+        const cpuValues = [];
+        
+        // 正則表達式：匹配 [YYYY-MM-DD HH:mm:ss] 與 CPU Load (1min): 數值
+        const timeRegex = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/g;
+        const loadRegex = /CPU Load \(1min\):\s*([\d.]+)/g;
+        
+        let timeMatch;
+        let loadMatch;
+
+        while ((timeMatch = timeRegex.exec(content)) !== null && (loadMatch = loadRegex.exec(content)) !== null) {
+            labels.push(timeMatch[1]);
+            cpuValues.push(parseFloat(loadMatch[1]));
+        }
+
+        return { labels, cpuValues };
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('cpuChart').getContext('2d');
+        
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: 'CPU Load (1min)',
+                    data: data.cpuValues,
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    borderWidth: 1,
+                    pointRadius: 1,
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { display: true, title: { display: true, text: '時間戳記' } },
+                    y: { display: true, title: { display: true, text: '負載 %' }, beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    async function exportToPDF() {
+        const { jsPDF } = window.jspdf;
+        const element = document.getElementById('report-area');
+        
+        // 暫時隱藏按鈕避免出現在 PDF 中
+        const controls = document.querySelector('.controls');
+        controls.style.display = 'none';
+
+        const canvas = await html2canvas(element, { scale: 2 });
+        const imgData = canvas.toDataURL('image/png');
+        
+        const pdf = new jsPDF('l', 'mm', 'a4');
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
+        pdf.save(`System_Log_Report_${Date.now()}.pdf`);
+        
+        controls.style.display = 'flex';
+    }
+</script>
+
+</body>
+</html>
