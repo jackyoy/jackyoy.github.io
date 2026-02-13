@@ -2,29 +2,37 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>System Monitor Interactive Report</title>
+    <title>System Monitor Professional Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 30px; background: #f0f2f5; }
-        .container { max-width: 1200px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .controls { margin-bottom: 25px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
-        .info { color: #666; font-size: 0.9em; margin-top: 10px; }
-        button { cursor: pointer; padding: 10px 20px; border: none; border-radius: 6px; font-weight: 600; margin-right: 10px; }
-        .btn-upload { background: #007bff; color: white; }
-        .btn-download { background: #28a745; color: white; }
-        canvas { max-height: 600px; }
+        body { font-family: -apple-system, "Segoe UI", sans-serif; padding: 20px; background: #f4f7f9; }
+        .container { max-width: 1300px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; margin-bottom: 20px; padding-bottom: 15px; }
+        .controls { background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; border: 1px solid #e0e0e0; }
+        button { cursor: pointer; padding: 10px 20px; border: none; border-radius: 6px; font-weight: 600; transition: 0.2s; background: #007bff; color: white; }
+        button:hover { background: #0056b3; }
+        #saveHtmlBtn { background: #28a745; display: none; }
+        .canvas-wrapper { position: relative; height: 65vh; width: 100%; }
+        .tip { font-size: 12px; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>設備效能互動式報告</h2>
+    <div class="header">
+        <h2 style="margin:0;">設備效能分析監控報告</h2>
+        <div id="report-time"></div>
+    </div>
+
     <div class="controls" id="ui-controls">
         <input type="file" id="fileInput" accept=".log,.txt">
-        <button class="btn-download" id="saveHtmlBtn" style="display:none;">儲存為互動 HTML 報告</button>
-        <p class="info">提示：上傳 Log 後即可預覽並導出互動式報告檔。</p>
+        <button id="saveHtmlBtn">儲存為互動 HTML 報告</button>
+        <span class="tip">支援拖放文件，滑鼠懸停圖表可查看精確數值</span>
     </div>
-    <canvas id="monitorChart"></canvas>
+
+    <div class="canvas-wrapper">
+        <canvas id="monitorChart"></canvas>
+    </div>
 </div>
 
 <script>
@@ -38,11 +46,10 @@
         lastData = parseLog(text);
         renderChart(lastData);
         document.getElementById('saveHtmlBtn').style.display = 'inline-block';
+        document.getElementById('report-time').innerText = "報告生成時間: " + new Date().toLocaleString();
     });
 
-    document.getElementById('saveHtmlBtn').addEventListener('click', () => {
-        generateStandaloneHtml();
-    });
+    document.getElementById('saveHtmlBtn').addEventListener('click', () => generateStandaloneHtml());
 
     function parseLog(content) {
         const labels = [], cpu = [], ram = [];
@@ -50,8 +57,10 @@
         const cRegex = /CPU Load \(1min\):\s*([\d.]+)/g;
         const rRegex = /RAM Used:\s*([\d.]+)/g;
         let t, c, r;
-        while ((t = tRegex.exec(content)) && (c = cRegex.exec(content)) && (r = rRegex.exec(content))) {
-            labels.push(t[1]); cpu.push(parseFloat(c[1])); ram.push(parseFloat(r[1]));
+        while ((t = tRegex.exec(content)) && (c = cpuRegex.exec(content)) && (r = rRegex.exec(content))) {
+            labels.push(t[1]); 
+            cpu.push(parseFloat(c[1])); 
+            ram.push(parseFloat(r[1]));
         }
         return { labels, cpu, ram };
     }
@@ -59,63 +68,109 @@
     function renderChart(data) {
         const ctx = document.getElementById('monitorChart').getContext('2d');
         if (chartInstance) chartInstance.destroy();
+
         chartInstance = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: data.labels,
                 datasets: [
-                    { label: 'CPU Load (%)', data: data.cpu, borderColor: '#e74c3c', yAxisID: 'y', pointRadius: 2 },
-                    { label: 'RAM Used (GiB)', data: data.ram, borderColor: '#3498db', yAxisID: 'y1', pointRadius: 2 }
+                    {
+                        label: 'CPU Load (%)',
+                        data: data.cpu,
+                        borderColor: 'rgba(231, 76, 60, 0.8)',
+                        backgroundColor: 'rgba(231, 76, 60, 0.05)',
+                        yAxisID: 'y',
+                        borderWidth: 1.5,
+                        pointRadius: 0,        // 核心修正：移除圓點標記
+                        pointHoverRadius: 4,   // 僅在懸停時顯示點
+                        tension: 0.1,          // 輕微平滑
+                        fill: true
+                    },
+                    {
+                        label: 'RAM Used (GiB)',
+                        data: data.ram,
+                        borderColor: 'rgba(52, 152, 219, 0.8)',
+                        yAxisID: 'y1',
+                        borderWidth: 2,
+                        pointRadius: 0,        // 核心修正：移除圓點標記
+                        pointHoverRadius: 4,
+                        tension: 0,            // RAM 通常呈階梯狀，不建議平滑
+                        stepped: true          // 採用階梯線顯示記憶體變化更精確
+                    }
                 ]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: { enabled: true, padding: 10 }
+                },
                 scales: {
-                    y: { type: 'linear', position: 'left', title: { display: true, text: 'CPU (%)' } },
-                    y1: { type: 'linear', position: 'right', title: { display: true, text: 'RAM (GiB)' }, grid: { drawOnChartArea: false } }
+                    x: {
+                        ticks: {
+                            maxRotation: 45,
+                            autoSkip: true,    // 自動跳過重疊標籤
+                            maxTicksLimit: 15  // 限制標籤數量
+                        }
+                    },
+                    y: { 
+                        type: 'linear', 
+                        position: 'left', 
+                        title: { display: true, text: 'CPU (%)' },
+                        min: 0 
+                    },
+                    y1: { 
+                        type: 'linear', 
+                        position: 'right', 
+                        title: { display: true, text: 'RAM (GiB)' },
+                        grid: { drawOnChartArea: false }
+                    }
                 }
             }
         });
     }
 
     function generateStandaloneHtml() {
-        // 取得當前 HTML 並注入已解析的數據
         const dataJson = JSON.stringify(lastData);
         const reportHtml = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Report - Generated</title>
+    <title>System Performance Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        .container { max-width: 1100px; margin: auto; }
+        body { font-family: sans-serif; padding: 20px; background: #fff; }
+        .container { max-width: 1200px; margin: auto; border: 1px solid #ddd; padding: 20px; }
+        h2 { border-left: 5px solid #007bff; padding-left: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>系統效能歷史報告 (${new Date().toLocaleString()})</h2>
-        <canvas id="c"></canvas>
+        <h2>系統效能歷史報告 - 互動版本</h2>
+        <p>生成時間: ${new Date().toLocaleString()}</p>
+        <div style="height: 600px;"><canvas id="c"></canvas></div>
     </div>
     <script>
         const data = ${dataJson};
-        const ctx = document.getElementById('c').getContext('2d');
-        new Chart(ctx, {
+        new Chart(document.getElementById('c'), {
             type: 'line',
             data: {
                 labels: data.labels,
                 datasets: [
-                    { label: 'CPU (%)', data: data.cpu, borderColor: '#e74c3c', yAxisID: 'y' },
-                    { label: 'RAM (GiB)', data: data.ram, borderColor: '#3498db', yAxisID: 'y1' }
+                    { label: 'CPU (%)', data: data.cpu, borderColor: '#e74c3c', yAxisID: 'y', pointRadius: 0, tension: 0.1 },
+                    { label: 'RAM (GiB)', data: data.ram, borderColor: '#3498db', yAxisID: 'y1', pointRadius: 0, stepped: true }
                 ]
             },
             options: { 
+                maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 scales: { 
-                    y: { position: 'left' }, 
-                    y1: { position: 'right', grid: { drawOnChartArea: false } } 
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 20 } },
+                    y: { position: 'left', title: { display: true, text: 'CPU %' } }, 
+                    y1: { position: 'right', title: { display: true, text: 'GiB' }, grid: { drawOnChartArea: false } } 
                 } 
             }
         });
@@ -124,10 +179,9 @@
 </html>`;
 
         const blob = new Blob([reportHtml], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `Performance_Report_${Date.now()}.html`;
+        a.href = URL.createObjectURL(blob);
+        a.download = "Report_Interactive.html";
         a.click();
     }
 </script>
