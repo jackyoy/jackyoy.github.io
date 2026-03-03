@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v20 (Final Fix)</title>
+    <title>RHEL SOS Analyzer v21 (Stable)</title>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -47,8 +47,8 @@
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" id="drop-zone">
                 <div style="font-size: 3rem; margin-bottom: 15px;">📂</div>
-                <h4>上傳 SOS Report (.tar.xz)</h4>
-                <p class="text-muted">支援 RHEL 7/8/9 (強力掃描模式)</p>
+                <h4>上傳 SOS Report (.tar.xz / .tar.gz)</h4>
+                <p class="text-muted">若 .tar.xz 失敗，請嘗試使用 .tar.gz 格式</p>
             </div>
             <input type="file" id="dir-input" class="d-none" accept=".tar.xz,.tar.gz,.tar">
         </div>
@@ -86,7 +86,7 @@
 
         <div id="view-debug" class="content-view hidden">
             <h4>File Index (Debug Mode)</h4>
-            <div class="alert alert-warning">此處顯示 Python 成功讀取的所有檔案路徑。若此處空白，代表解壓縮完全失敗。</div>
+            <div class="alert alert-warning" id="debug-alert"></div>
             <div class="console-box" id="debug-list"></div>
         </div>
         
@@ -130,82 +130,102 @@
 
         const App = { files: new Map(), filePaths: [], memChart: null };
 
-        // --- File Processing (Corrected Data Passing) ---
+        // --- File Processing ---
         async function handleFileUpload(file) {
             const loader = document.getElementById('loader');
             loader.classList.remove('hidden');
-            loader.textContent = "正在解壓與分析 (讀取中)...";
+            loader.textContent = "正在解壓與分析...";
 
             try {
                 const pyodide = await initPyodide();
                 const buffer = await file.arrayBuffer();
                 
-                // 關鍵修正：將資料掛載到 window 全域變數，確保 Python 的 js 模組能讀取
+                // Mount data to global window object
                 window.sos_data = new Uint8Array(buffer);
 
                 // Python Script
                 const pyScript = `
 import tarfile, io, js, traceback
+import sys
 
 files = {}
 debug_log = []
+critical_error = None
 
 try:
-    # 修正：透過 js.sos_data 讀取全域變數，並強制轉為 Python bytes
+    # 1. Check for LZMA support
+    try:
+        import lzma
+    except ImportError:
+        debug_log.append("WARNING: 'lzma' module not found. .tar.xz files will fail.")
+    
+    # 2. Read Data
     py_bytes = js.sos_data.to_py()
     file_stream = io.BytesIO(bytes(py_bytes))
     
-    with tarfile.open(fileobj=file_stream, mode='r:*') as tar:
-        for m in tar:
-            if len(debug_log) < 5:
-                debug_log.append(f"Found: {m.name} ({m.size})")
+    # 3. Open Tarfile
+    try:
+        with tarfile.open(fileobj=file_stream, mode='r:*') as tar:
+            for m in tar:
+                if len(debug_log) < 5:
+                    debug_log.append(f"Found: {m.name} ({m.size})")
 
-            if m.isfile() and m.size < 10*1024*1024:
-                if any(ext in m.name for ext in ['.gz', '.zip', '.rpm', '.iso', '.pyc', '.bin']):
-                    continue
-                
-                try:
-                    content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
-                    # 簡化路徑 (移除 sosreport-xxx 資料夾)
-                    parts = m.name.split("/")
-                    clean_name = "/".join(parts[1:]) if len(parts) > 1 else m.name
-                    files[clean_name] = content
-                except Exception:
-                    pass
+                if m.isfile() and m.size < 10*1024*1024:
+                    if any(ext in m.name for ext in ['.zip', '.rpm', '.iso', '.bin']):
+                        continue
+                    
+                    try:
+                        content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
+                        parts = m.name.split("/")
+                        clean_name = "/".join(parts[1:]) if len(parts) > 1 else m.name
+                        files[clean_name] = content
+                    except: pass
+    except tarfile.ReadError as e:
+        err_str = str(e)
+        if "lzma module is not available" in err_str:
+            critical_error = "LZMA_MISSING"
+        else:
+            critical_error = f"TAR_ERROR: {err_str}"
+        debug_log.append(f"ReadError: {err_str}")
 
 except Exception as e:
-    # 捕捉完整錯誤堆疊，方便除錯
-    err_msg = traceback.format_exc()
-    debug_log.append("CRITICAL ERROR:")
-    debug_log.append(err_msg)
+    critical_error = f"UNKNOWN_ERROR: {str(e)}"
+    debug_log.append(traceback.format_exc())
 
-(files, debug_log)
+(files, debug_log, critical_error)
 `;
                 const result = pyodide.runPython(pyScript);
                 const pyResult = result.toJs(); 
                 const fileMap = pyResult[0];
                 const debugLog = pyResult[1];
+                const criticalError = pyResult[2];
                 result.destroy();
 
-                // 釋放記憶體
                 window.sos_data = null; 
 
-                // 儲存結果
+                // --- Error Handling ---
+                if (criticalError === "LZMA_MISSING") {
+                    alert("❌ 錯誤：您的 Pyodide 環境缺少 LZMA 模組，無法解壓 .tar.xz 檔。\n\n建議解決方案：\n1. 請改上傳 .tar.gz 格式的 SOS Report。\n2. 或重新下載 Pyodide 完整版 (Full Release) 並覆蓋 static 資料夾。");
+                    document.getElementById('debug-alert').textContent = "Critical Error: LZMA module missing. Please use .tar.gz or update Pyodide files.";
+                    document.getElementById('debug-list').textContent = debugLog.join('\n');
+                    switchTab('debug', document.querySelector('.nav-link:last-child'));
+                    return;
+                } else if (criticalError) {
+                    alert("解析失敗：" + criticalError);
+                    document.getElementById('debug-list').textContent = debugLog.join('\n');
+                    switchTab('debug', document.querySelector('.nav-link:last-child'));
+                    return;
+                }
+
+                // --- Success Path ---
                 App.files.clear(); App.filePaths = [];
                 for (let [path, content] of fileMap) {
                     App.filePaths.push(path);
                     App.files.set(path, content);
                 }
 
-                console.log("Python Log:", debugLog); 
-
-                // 判斷結果
-                if (debugLog.some(l => l.includes("CRITICAL ERROR"))) {
-                    alert("解析過程發生錯誤，請查看 Debug 分頁。\n" + debugLog.join('\n'));
-                    document.getElementById('debug-list').textContent = debugLog.join('\n');
-                    switchTab('debug', document.querySelector('.nav-link:last-child'));
-                } else if (App.filePaths.length === 0) {
-                    alert("警告：壓縮檔內找不到可讀文字檔。\nLog:\n" + debugLog.join('\n'));
+                if (App.filePaths.length === 0) {
+                    alert("警告：壓縮檔內找不到可讀文字檔。");
                 } else {
                     await runAnalysis();
                     document.getElementById('view-upload').classList.add('hidden');
@@ -226,7 +246,6 @@ except Exception as e:
                 return p ? App.files.get(p) : null;
             };
 
-            // Basic Info
             const hn = getFile(/hostname$/);
             if (hn) document.getElementById('dash-hostname').textContent = hn.trim();
             
@@ -239,7 +258,6 @@ except Exception as e:
             const ker = getFile(/uname/);
             if (ker) document.getElementById('dash-kernel').textContent = ker.trim();
 
-            // Memory
             try {
                 const mem = getFile(/(^|\/)free$/);
                 if (mem) {
@@ -252,7 +270,6 @@ except Exception as e:
                 }
             } catch(e) {}
 
-            // Process
             const ps = getFile(/ps_aux/);
             if (ps) {
                 const rows = ps.split('\n').slice(1, 20).map(l => {
@@ -281,7 +298,6 @@ except Exception as e:
             document.getElementById('mem-text').innerHTML = `Used: ${(used/1024/1024).toFixed(1)}G | Free: ${(free/1024/1024).toFixed(1)}G`;
         }
 
-        // Event Bindings
         const dropZone = document.getElementById('drop-zone');
         dropZone.onclick = () => document.getElementById('dir-input').click();
         document.getElementById('dir-input').onchange = (e) => {
