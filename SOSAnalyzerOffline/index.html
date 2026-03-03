@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v22 (CDN Online)</title>
+    <title>RHEL SOS Analyzer v23 (Stable Build)</title>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
 
     <style>
         :root { --sidebar-width: 260px; --bg-dark: #1e1e2f; --accent: #0d6efd; }
@@ -26,6 +26,9 @@
         .upload-box { border: 2px dashed #ccc; padding: 60px; border-radius: 16px; background: #fff; text-align: center; cursor: pointer; width: 600px; transition: 0.2s; }
         .upload-box:hover { border-color: var(--accent); background: #f0f8ff; }
         .hidden { display: none !important; }
+        .status-dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-ready { background-color: #198754; }
+        .status-error { background-color: #dc3545; }
     </style>
 </head>
 <body>
@@ -40,16 +43,19 @@
             <a class="nav-link" onclick="switchTab('logs', this)">📝 日誌瀏覽器 (Logs)</a>
             <a class="nav-link" onclick="switchTab('debug', this)">🐞 檔案檢測 (Debug)</a>
         </nav>
+        <div class="mt-auto p-3 small text-white-50">
+            <span id="py-status" class="status-dot"></span> <span id="py-msg">Python 初始化中...</span>
+        </div>
     </div>
 
     <div class="main-content">
-        <div id="loader" class="alert alert-info hidden">正在連線至 Pyodide CDN...</div>
+        <div id="loader" class="alert alert-info hidden">正在處理...</div>
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" id="drop-zone">
-                <div style="font-size: 3rem; margin-bottom: 15px;">☁️</div>
+                <div style="font-size: 3rem; margin-bottom: 15px;">📦</div>
                 <h4>上傳 SOS Report (.tar.xz)</h4>
-                <p class="text-muted">使用線上核心解析 (無需本地檔案)</p>
+                <p class="text-muted">若 .tar.xz 上傳失敗，請解壓為 .tar 後再試</p>
             </div>
             <input type="file" id="dir-input" class="d-none" accept=".tar.xz,.tar.gz,.tar">
         </div>
@@ -86,9 +92,11 @@
         </div>
 
         <div id="view-debug" class="content-view hidden">
-            <h4>File Index (Debug Mode)</h4>
-            <div class="alert alert-warning" id="debug-alert"></div>
-            <div class="console-box" id="debug-list"></div>
+            <h4>File Index & Debug Log</h4>
+            <div class="alert alert-secondary small">
+                若上傳失敗，請檢查下方錯誤訊息。常見原因：瀏覽器阻擋 WASM 元件下載。
+            </div>
+            <div class="console-box" id="debug-list">Waiting for upload...</div>
         </div>
         
         <div id="view-host-info" class="content-view hidden"><h4>Host Info</h4><div class="console-box" id="info-middleware">Select a file first.</div></div>
@@ -104,30 +112,47 @@
             document.querySelectorAll('.content-view').forEach(v => v.classList.add('hidden'));
             const target = document.getElementById('view-' + id);
             if(target) target.classList.remove('hidden');
-            
             document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
             if(element) element.classList.add('active');
         }
 
-        // --- Pyodide Setup (CDN Mode) ---
+        function setStatus(type, msg) {
+            const el = document.getElementById('py-status');
+            const txt = document.getElementById('py-msg');
+            el.className = 'status-dot ' + (type === 'ok' ? 'status-ready' : 'status-error');
+            txt.textContent = msg;
+        }
+
+        // --- Pyodide Setup (v0.24.1) ---
         let pyodideReadyPromise = null;
         async function initPyodide() {
             if (!pyodideReadyPromise) {
-                const loader = document.getElementById('loader');
-                loader.classList.remove('hidden');
-                loader.textContent = "正在下載 Pyodide 核心 (首次約需 10 秒)...";
                 try {
-                    // 使用 CDN URL 初始化，自動補齊所有依賴 (包含 lzma)
-                    pyodideReadyPromise = loadPyodide({
-                        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.0/full/"
+                    setStatus('loading', '下載核心中...');
+                    // 使用 v0.24.1 穩定版
+                    pyodideReadyPromise = await loadPyodide({
+                        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/"
                     });
+                    
+                    // 立即檢查 LZMA 支援
+                    await pyodideReadyPromise.runPythonAsync(`
+                        import lzma
+                        print("LZMA Module Loaded Successfully")
+                    `);
+                    setStatus('ok', 'Python 就緒');
+                    return pyodideReadyPromise;
                 } catch (e) {
-                    alert("CDN 連線失敗，請檢查網路狀態。");
+                    console.error(e);
+                    setStatus('error', '環境錯誤');
+                    alert("Pyodide 初始化失敗：無法載入 LZMA 模組。\n這通常是因為網路防火牆或瀏覽器阻擋了 .wasm 檔案。\n\n請嘗試：\n1. 關閉此網站的廣告阻擋器/追蹤防護。\n2. 或者先將檔案解壓為 .tar 再上傳。");
                     throw e;
                 }
             }
             return pyodideReadyPromise;
         }
+
+        // 頁面載入時預先初始化
+        window.onload = () => { initPyodide(); };
 
         const App = { files: new Map(), filePaths: [], memChart: null };
 
@@ -135,55 +160,56 @@
         async function handleFileUpload(file) {
             const loader = document.getElementById('loader');
             loader.classList.remove('hidden');
-            loader.textContent = "正在解壓與分析...";
+            loader.textContent = "正在解壓...";
 
             try {
-                const pyodide = await initPyodide();
-                const buffer = await file.arrayBuffer();
+                // 確保 Pyodide 已就緒
+                const pyodide = pyodideReadyPromise || await initPyodide();
                 
-                // Mount data to global window object
+                const buffer = await file.arrayBuffer();
                 window.sos_data = new Uint8Array(buffer);
 
-                // Python Script
                 const pyScript = `
-import tarfile, io, js, traceback
-import sys
-
-# 嘗試匯入 lzma，CDN 版應該直接成功
-try:
-    import lzma
-except ImportError:
-    pass
+import tarfile, io, js, traceback, sys
 
 files = {}
 debug_log = []
 critical_error = None
 
 try:
-    # 讀取資料
+    # 檢查 lzma
+    try:
+        import lzma
+    except ImportError:
+        debug_log.append("WARNING: lzma module import failed!")
+
     py_bytes = js.sos_data.to_py()
     file_stream = io.BytesIO(bytes(py_bytes))
     
-    # 開啟壓縮檔
+    # 開啟檔案 (自動偵測格式)
     with tarfile.open(fileobj=file_stream, mode='r:*') as tar:
         for m in tar:
-            if len(debug_log) < 5:
-                debug_log.append(f"Found: {m.name}")
+            if len(debug_log) < 3: debug_log.append(f"Scan: {m.name}")
 
             if m.isfile() and m.size < 10*1024*1024:
-                # 簡單過濾二進位
-                if any(ext in m.name for ext in ['.zip', '.rpm', '.iso', '.bin']):
-                    continue
+                # 排除二進位與無用檔案
+                if any(ext in m.name for ext in ['.zip', '.rpm', '.iso', '.bin', '.pyc']): continue
                 
                 try:
                     content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
+                    # 簡化路徑 (去除第一層目錄)
                     parts = m.name.split("/")
                     clean_name = "/".join(parts[1:]) if len(parts) > 1 else m.name
                     files[clean_name] = content
                 except: pass
 
 except Exception as e:
-    critical_error = f"ERROR: {str(e)}"
+    err = str(e)
+    # 針對 .tar.xz 的常見錯誤進行翻譯
+    if "lzma module is not available" in err:
+        critical_error = "LZMA_MISSING"
+    else:
+        critical_error = f"ERROR: {err}"
     debug_log.append(traceback.format_exc())
 
 (files, debug_log, critical_error)
@@ -194,18 +220,20 @@ except Exception as e:
                 const debugLog = pyResult[1];
                 const criticalError = pyResult[2];
                 result.destroy();
-
                 window.sos_data = null; 
 
-                // --- Error Handling ---
-                if (criticalError) {
-                    alert("解析失敗：" + criticalError);
+                if (criticalError === "LZMA_MISSING") {
+                    alert("❌ 錯誤：瀏覽器無法載入解壓縮元件 (LZMA)。\n\n解決方案：請手動將檔案解壓縮成 .tar 檔，然後再上傳 .tar 檔即可。");
                     document.getElementById('debug-list').textContent = debugLog.join('\n');
                     switchTab('debug', document.querySelector('.nav-link:last-child'));
                     return;
+                } else if (criticalError) {
+                    alert("解析失敗：" + criticalError);
+                    document.getElementById('debug-list').textContent = debugLog.join('\n');
+                    return;
                 }
 
-                // --- Success Path ---
+                // 成功路徑
                 App.files.clear(); App.filePaths = [];
                 for (let [path, content] of fileMap) {
                     App.filePaths.push(path);
@@ -213,8 +241,7 @@ except Exception as e:
                 }
 
                 if (App.filePaths.length === 0) {
-                    alert("警告：壓縮檔內找不到可讀文字檔。");
-                    document.getElementById('debug-list').textContent = debugLog.join('\n');
+                    alert("警告：未找到可分析的文字檔。");
                 } else {
                     await runAnalysis();
                     document.getElementById('view-upload').classList.add('hidden');
@@ -223,7 +250,7 @@ except Exception as e:
 
             } catch (err) {
                 console.error(err);
-                alert("JavaScript 執行錯誤: " + err.message);
+                alert("執行錯誤: " + err.message);
             } finally {
                 loader.classList.add('hidden');
             }
@@ -269,7 +296,7 @@ except Exception as e:
                 document.getElementById('proc-body').innerHTML = rows;
             }
 
-            document.getElementById('debug-list').textContent = "Total Files: " + App.filePaths.length + "\n\n" + App.filePaths.join('\n');
+            document.getElementById('debug-list').textContent = "Files Loaded: " + App.filePaths.length + "\n\n" + App.filePaths.join('\n');
         }
 
         function renderMem(used, free, buff) {
