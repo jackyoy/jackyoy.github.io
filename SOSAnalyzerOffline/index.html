@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v23 (Stable Build)</title>
+    <title>RHEL SOS Analyzer v24 (InPrivate Compatible)</title>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
 
     <style>
         :root { --sidebar-width: 260px; --bg-dark: #1e1e2f; --accent: #0d6efd; }
@@ -44,7 +44,7 @@
             <a class="nav-link" onclick="switchTab('debug', this)">🐞 檔案檢測 (Debug)</a>
         </nav>
         <div class="mt-auto p-3 small text-white-50">
-            <span id="py-status" class="status-dot"></span> <span id="py-msg">Python 初始化中...</span>
+            <span id="py-status" class="status-dot"></span> <span id="py-msg">Python 初始化...</span>
         </div>
     </div>
 
@@ -53,9 +53,9 @@
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" id="drop-zone">
-                <div style="font-size: 3rem; margin-bottom: 15px;">📦</div>
-                <h4>上傳 SOS Report (.tar.xz)</h4>
-                <p class="text-muted">若 .tar.xz 上傳失敗，請解壓為 .tar 後再試</p>
+                <div style="font-size: 3rem; margin-bottom: 15px;">🛡️</div>
+                <h4>上傳 SOS Report</h4>
+                <p class="text-muted">若您使用無痕模式 (InPrivate) 且上傳失敗<br>請先將檔案解壓為 <b>.tar</b> 再上傳</p>
             </div>
             <input type="file" id="dir-input" class="d-none" accept=".tar.xz,.tar.gz,.tar">
         </div>
@@ -94,7 +94,7 @@
         <div id="view-debug" class="content-view hidden">
             <h4>File Index & Debug Log</h4>
             <div class="alert alert-secondary small">
-                若上傳失敗，請檢查下方錯誤訊息。常見原因：瀏覽器阻擋 WASM 元件下載。
+                如果遇到 LZMA Error，請嘗試使用 .tar 或 .tar.gz 格式上傳。
             </div>
             <div class="console-box" id="debug-list">Waiting for upload...</div>
         </div>
@@ -123,35 +123,30 @@
             txt.textContent = msg;
         }
 
-        // --- Pyodide Setup (v0.24.1) ---
+        // --- Pyodide Setup (v0.26.1) ---
         let pyodideReadyPromise = null;
         async function initPyodide() {
             if (!pyodideReadyPromise) {
                 try {
                     setStatus('loading', '下載核心中...');
-                    // 使用 v0.24.1 穩定版
+                    // 使用最新的 v0.26.1
                     pyodideReadyPromise = await loadPyodide({
-                        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/"
+                        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.1/full/"
                     });
                     
-                    // 立即檢查 LZMA 支援
-                    await pyodideReadyPromise.runPythonAsync(`
-                        import lzma
-                        print("LZMA Module Loaded Successfully")
-                    `);
+                    // 我們不再這裡強制檢查 LZMA，避免一開機就崩潰
                     setStatus('ok', 'Python 就緒');
                     return pyodideReadyPromise;
                 } catch (e) {
                     console.error(e);
-                    setStatus('error', '環境錯誤');
-                    alert("Pyodide 初始化失敗：無法載入 LZMA 模組。\n這通常是因為網路防火牆或瀏覽器阻擋了 .wasm 檔案。\n\n請嘗試：\n1. 關閉此網站的廣告阻擋器/追蹤防護。\n2. 或者先將檔案解壓為 .tar 再上傳。");
+                    setStatus('error', '環境受限');
+                    alert("Pyodide 初始化遇到問題。\n如果您正在使用 InPrivate/無痕模式，請切換回正常視窗再試。");
                     throw e;
                 }
             }
             return pyodideReadyPromise;
         }
 
-        // 頁面載入時預先初始化
         window.onload = () => { initPyodide(); };
 
         const App = { files: new Map(), filePaths: [], memChart: null };
@@ -163,9 +158,7 @@
             loader.textContent = "正在解壓...";
 
             try {
-                // 確保 Pyodide 已就緒
                 const pyodide = pyodideReadyPromise || await initPyodide();
-                
                 const buffer = await file.arrayBuffer();
                 window.sos_data = new Uint8Array(buffer);
 
@@ -177,27 +170,27 @@ debug_log = []
 critical_error = None
 
 try:
-    # 檢查 lzma
+    # 嘗試匯入 LZMA，如果失敗不要崩潰，只是記錄下來
+    lzma_available = False
     try:
         import lzma
+        lzma_available = True
     except ImportError:
-        debug_log.append("WARNING: lzma module import failed!")
+        debug_log.append("WARNING: lzma module could not be loaded (likely browser restriction).")
 
     py_bytes = js.sos_data.to_py()
     file_stream = io.BytesIO(bytes(py_bytes))
     
-    # 開啟檔案 (自動偵測格式)
+    # 開啟檔案
     with tarfile.open(fileobj=file_stream, mode='r:*') as tar:
         for m in tar:
             if len(debug_log) < 3: debug_log.append(f"Scan: {m.name}")
 
             if m.isfile() and m.size < 10*1024*1024:
-                # 排除二進位與無用檔案
                 if any(ext in m.name for ext in ['.zip', '.rpm', '.iso', '.bin', '.pyc']): continue
                 
                 try:
                     content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
-                    # 簡化路徑 (去除第一層目錄)
                     parts = m.name.split("/")
                     clean_name = "/".join(parts[1:]) if len(parts) > 1 else m.name
                     files[clean_name] = content
@@ -206,8 +199,8 @@ try:
 except Exception as e:
     err = str(e)
     # 針對 .tar.xz 的常見錯誤進行翻譯
-    if "lzma module is not available" in err:
-        critical_error = "LZMA_MISSING"
+    if "lzma" in err or "compression" in err.lower():
+        critical_error = "LZMA_ERROR"
     else:
         critical_error = f"ERROR: {err}"
     debug_log.append(traceback.format_exc())
@@ -222,8 +215,8 @@ except Exception as e:
                 result.destroy();
                 window.sos_data = null; 
 
-                if (criticalError === "LZMA_MISSING") {
-                    alert("❌ 錯誤：瀏覽器無法載入解壓縮元件 (LZMA)。\n\n解決方案：請手動將檔案解壓縮成 .tar 檔，然後再上傳 .tar 檔即可。");
+                if (criticalError === "LZMA_ERROR") {
+                    alert("⚠️ 無法解壓 .xz 檔案。\n\n原因：您的瀏覽器模式 (InPrivate) 阻擋了 LZMA 元件的載入。\n\n解決方法：\n1. 請切換到「正常視窗」再試一次 (推薦)。\n2. 或者將檔案解壓為 .tar，然後上傳 .tar 檔。");
                     document.getElementById('debug-list').textContent = debugLog.join('\n');
                     switchTab('debug', document.querySelector('.nav-link:last-child'));
                     return;
