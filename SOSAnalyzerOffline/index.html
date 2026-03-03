@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHEL SOS Analyzer v19 (Fixed)</title>
+    <title>RHEL SOS Analyzer v19 (Debug Mode)</title>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    
     <script src="./static/pyodide/pyodide.js"></script>
 
     <style>
@@ -26,13 +25,12 @@
         .upload-box { border: 2px dashed #ccc; padding: 60px; border-radius: 16px; background: #fff; text-align: center; cursor: pointer; width: 600px; transition: 0.2s; }
         .upload-box:hover { border-color: var(--accent); background: #f0f8ff; }
         .hidden { display: none !important; }
-        #sys-error { display: none; margin-bottom: 20px; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
-        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Offline v19</div>
+        <div class="p-3 fw-bold border-bottom border-secondary">RHEL SOS Analyzer</div>
         <nav class="nav flex-column mt-2">
             <a class="nav-link active" onclick="switchTab('dashboard', this)">📊 總覽 (Dashboard)</a>
             <a class="nav-link" onclick="switchTab('host-info', this)">🖥️ 系統資訊 (Host)</a>
@@ -44,14 +42,13 @@
     </div>
 
     <div class="main-content">
-        <div id="sys-error" class="alert alert-danger"></div>
         <div id="loader" class="alert alert-info hidden">正在初始化 Python 環境...</div>
 
         <div id="view-upload" class="upload-wrapper">
             <div class="upload-box" id="drop-zone">
                 <div style="font-size: 3rem; margin-bottom: 15px;">📂</div>
                 <h4>上傳 SOS Report (.tar.xz)</h4>
-                <p class="text-muted">支援 RHEL 7/8/9 壓縮檔<br><small>GitHub Pages / Local Compatible</small></p>
+                <p class="text-muted">強力掃描模式 (無檔名過濾)</p>
             </div>
             <input type="file" id="dir-input" class="d-none" accept=".tar.xz,.tar.gz,.tar">
         </div>
@@ -88,11 +85,12 @@
         </div>
 
         <div id="view-debug" class="content-view hidden">
-            <h4>File Index Debugger</h4>
+            <h4>File Index (Debug Mode)</h4>
+            <div class="alert alert-warning">此處顯示 Python 成功讀取的所有檔案路徑。若此處空白，代表解壓縮完全失敗。</div>
             <div class="console-box" id="debug-list"></div>
         </div>
         
-        <div id="view-host-info" class="content-view hidden"><h4>Host Info</h4><div class="console-box" id="info-middleware">Pending...</div></div>
+        <div id="view-host-info" class="content-view hidden"><h4>Host Info</h4><div class="console-box" id="info-middleware">Select a file first.</div></div>
         <div id="view-sar" class="content-view hidden"><h4>SAR Analysis</h4><div class="console-box">Feature available after upload</div></div>
         <div id="view-network" class="content-view hidden"><h4>Network</h4><div class="console-box">Feature available after upload</div></div>
         <div id="view-logs" class="content-view hidden"><h4>Logs</h4><div class="console-box">Feature available after upload</div></div>
@@ -100,43 +98,30 @@
     </div>
 
     <script>
-        // --- 1. 基礎檢查與切換邏輯 (修復 classList 錯誤) ---
+        // --- UI Logic (Fixed switchTab) ---
         function switchTab(id, element) {
-            // 隱藏所有視圖
             document.querySelectorAll('.content-view').forEach(v => v.classList.add('hidden'));
+            const target = document.getElementById('view-' + id);
+            if(target) target.classList.remove('hidden');
             
-            // 顯示目標視圖 (加入 null 檢查)
-            const targetView = document.getElementById('view-' + id);
-            if (targetView) targetView.classList.remove('hidden');
-            
-            // 更新按鈕狀態
             document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-            
-            // 如果是點擊觸發 (element 存在)，直接激活；如果是程式觸發，用 ID 尋找
-            if (element) {
-                element.classList.add('active');
-            } else {
-                // 程式自動切換時的備用邏輯
-                const link = Array.from(document.querySelectorAll('.nav-link'))
-                    .find(el => el.getAttribute('onclick')?.includes(id));
-                if (link) link.classList.add('active');
-            }
+            if(element) element.classList.add('active');
         }
 
-        // --- 2. Pyodide 初始化 ---
+        // --- Pyodide Setup ---
         let pyodideReadyPromise = null;
         async function initPyodide() {
             if (!pyodideReadyPromise) {
                 const loader = document.getElementById('loader');
                 loader.classList.remove('hidden');
-                loader.textContent = "正在啟動 Python 核心 (Loading Pyodide)...";
+                loader.textContent = "正在載入 Python 環境... (第一次會比較慢)";
                 try {
                     pyodideReadyPromise = loadPyodide({
                         indexURL: "./static/pyodide/",
                         lockFileURL: "./static/pyodide/pyodide-lock.json"
                     });
                 } catch (e) {
-                    alert("Python 啟動失敗：請確認 .nojekyll 檔案存在且 static/pyodide 資料夾完整。");
+                    alert("Pyodide 載入失敗！請確認檔案結構。");
                     throw e;
                 }
             }
@@ -145,62 +130,92 @@
 
         const App = { files: new Map(), filePaths: [], memChart: null };
 
-        // --- 3. 檔案處理核心 ---
+        // --- File Processing (Relaxed Filter) ---
         async function handleFileUpload(file) {
             const loader = document.getElementById('loader');
             loader.classList.remove('hidden');
-            loader.textContent = "正在解壓並分析檔案 (Python Processing)...";
+            loader.textContent = "正在解壓與分析 (可能需要 10-20 秒)...";
 
             try {
                 const pyodide = await initPyodide();
                 const buffer = await file.arrayBuffer();
                 pyodide.globals.set("raw_data", new Uint8Array(buffer));
 
+                // Python Script: 移除檔名過濾，只過濾二進位檔
                 const pyScript = `
 import tarfile, io, js
+
 files = {}
+debug_log = []
+
 try:
     with tarfile.open(fileobj=io.BytesIO(js.raw_data.to_py()), mode='r:*') as tar:
         for m in tar:
-            if m.isfile() and m.size < 10*1024*1024: # Limit 10MB
-                # 簡單過濾，只抓這幾類關鍵檔案
-                if any(k in m.name for k in ['hostname', 'release', 'uptime', 'meminfo', 'ps', 'free']):
-                    try:
-                        content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
-                        clean_name = "/".join(m.name.split("/")[1:])
-                        files[clean_name] = content
-                    except: pass
-except Exception as e: print(str(e))
-files
+            # 記錄前 5 個遇到的檔案，用於除錯
+            if len(debug_log) < 5:
+                debug_log.append(f"Found: {m.name} (Size: {m.size})")
+
+            if m.isfile() and m.size < 10*1024*1024: # 10MB 限額
+                # 排除明顯的二進位檔，其他全部嘗試讀取
+                if any(ext in m.name for ext in ['.gz', '.zip', '.rpm', '.iso', '.pyc', '.bin']):
+                    continue
+                
+                try:
+                    # 使用 ignore 忽略編碼錯誤，盡可能讀取
+                    content = tar.extractfile(m).read().decode('utf-8', errors='ignore')
+                    
+                    # 清理路徑：移除第一層資料夾
+                    parts = m.name.split("/")
+                    if len(parts) > 1:
+                        clean_name = "/".join(parts[1:])
+                    else:
+                        clean_name = m.name
+                        
+                    files[clean_name] = content
+                except Exception as read_err:
+                    pass
+
+except Exception as e:
+    debug_log.append(f"Error: {str(e)}")
+
+# 回傳 tuple: (檔案字典, 除錯日誌)
+(files, debug_log)
 `;
                 const result = pyodide.runPython(pyScript);
-                const fileMap = result.toJs();
+                const pyResult = result.toJs(); // [Map, Array]
+                const fileMap = pyResult[0];
+                const debugLog = pyResult[1];
                 result.destroy();
 
+                // 儲存檔案
                 App.files.clear(); App.filePaths = [];
                 for (let [path, content] of fileMap) {
                     App.filePaths.push(path);
                     App.files.set(path, content);
                 }
 
+                console.log("Debug Log:", debugLog); // 在 F12 顯示 Python 內部的 Log
+
+                // 檢查是否成功
                 if (App.filePaths.length === 0) {
-                    alert("警告：未找到可分析的檔案。請確認上傳的是 SOS Report 壓縮檔。");
+                    let msg = "警告：解壓縮後未發現可讀文字檔。\n\nPython Log:\n" + debugLog.join('\n');
+                    alert(msg);
+                } else {
+                    await runAnalysis();
+                    document.getElementById('view-upload').classList.add('hidden');
+                    switchTab('dashboard', document.querySelector('.nav-link.active'));
                 }
 
-                await runAnalysis();
-                document.getElementById('view-upload').classList.add('hidden');
-                switchTab('dashboard'); // 自動切換
             } catch (err) {
                 console.error(err);
-                alert("分析失敗: " + err.message);
+                alert("嚴重錯誤: " + err.message);
             } finally {
                 loader.classList.add('hidden');
             }
         }
 
-        // --- 4. 分析與渲染 (加入容錯) ---
         async function runAnalysis() {
-            // Helper: Find file content by regex
+            // Helper: Case-insensitive search
             const getFile = (regex) => {
                 const p = App.filePaths.find(path => regex.test(path));
                 return p ? App.files.get(p) : null;
@@ -210,16 +225,16 @@ files
             const hn = getFile(/hostname$/);
             if (hn) document.getElementById('dash-hostname').textContent = hn.trim();
             
-            const rel = getFile(/redhat-release$/) || getFile(/os-release$/);
+            const rel = getFile(/release$/); // 放寬正則
             if (rel) document.getElementById('dash-release').textContent = rel.split('\n')[0];
 
             const up = getFile(/uptime$/);
             if (up) document.getElementById('dash-uptime').textContent = up.trim();
 
-            const ker = getFile(/uname_-a$/);
-            if (ker) document.getElementById('dash-kernel').textContent = ker.split(' ')[2] || ker;
+            const ker = getFile(/uname/);
+            if (ker) document.getElementById('dash-kernel').textContent = ker.trim();
 
-            // Memory Chart (Try-Catch 保護，避免 Chart 失敗導致全掛)
+            // Memory
             try {
                 const mem = getFile(/(^|\/)free$/);
                 if (mem) {
@@ -227,24 +242,15 @@ files
                     const mLine = lines.find(l => l.includes('Mem:'));
                     if (mLine) {
                         const p = mLine.trim().split(/\s+/);
-                        const total = parseFloat(p[1]);
-                        const used = parseFloat(p[2]);
-                        const free = parseFloat(p[3]);
-                        const buff = parseFloat(p[5]); // shared/buff/cache varies by version
-                        
-                        renderMem(used, free, buff);
+                        renderMem(parseFloat(p[2]), parseFloat(p[3]), parseFloat(p[5]));
                     }
                 }
-            } catch (e) {
-                console.error("Chart Error:", e);
-                document.getElementById('mem-text').textContent = "圖表載入失敗 (資料仍可讀)";
-            }
+            } catch(e) { console.error(e); }
 
-            // Top Processes (Simple parsing)
+            // Process
             const ps = getFile(/ps_aux/);
             if (ps) {
-                const lines = ps.split('\n');
-                const rows = lines.slice(1, 20).map(l => {
+                const rows = ps.split('\n').slice(1, 20).map(l => {
                     const c = l.trim().split(/\s+/);
                     if (c.length < 10) return '';
                     return `<tr><td>${c[1]}</td><td>${c[0]}</td><td>${c[3]}%</td><td>${c[2]}%</td><td class="text-truncate" style="max-width: 150px;">${c.slice(10).join(' ')}</td></tr>`;
@@ -252,17 +258,12 @@ files
                 document.getElementById('proc-body').innerHTML = rows;
             }
 
-            // Debug List
-            document.getElementById('debug-list').textContent = App.filePaths.join('\n');
+            // Populate Debug Tab
+            document.getElementById('debug-list').textContent = "Total Files: " + App.filePaths.length + "\n\n" + App.filePaths.join('\n');
         }
 
         function renderMem(used, free, buff) {
-            // 再次檢查 Chart 是否存在
-            if (typeof Chart === 'undefined') {
-                document.getElementById('mem-text').innerHTML = `<b>Chart.js Missing</b><br>Used: ${used} | Free: ${free}`;
-                return;
-            }
-
+            if (typeof Chart === 'undefined') return;
             const ctx = document.getElementById('memChart').getContext('2d');
             if (App.memChart) App.memChart.destroy();
             App.memChart = new Chart(ctx, {
@@ -273,22 +274,19 @@ files
                 },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
-            document.getElementById('mem-text').innerHTML = `Total: ${(used+free+buff).toFixed(0)} KB`;
+            document.getElementById('mem-text').innerHTML = `Used: ${(used/1024/1024).toFixed(1)}G | Free: ${(free/1024/1024).toFixed(1)}G`;
         }
 
-        // --- Event Listeners ---
+        // Event Bindings
         const dropZone = document.getElementById('drop-zone');
         dropZone.onclick = () => document.getElementById('dir-input').click();
         document.getElementById('dir-input').onchange = (e) => {
             if (e.target.files.length) handleFileUpload(e.target.files[0]);
         };
-        
-        // Drag & Drop
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#0d6efd'; });
         dropZone.addEventListener('dragleave', (e) => { dropZone.style.borderColor = '#ccc'; });
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropZone.style.borderColor = '#ccc';
             if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
         });
     </script>
